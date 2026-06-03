@@ -11,7 +11,7 @@ def parse_solution_mis(response):
         pred_match = re.search(r"\s*\[([^\]]+)\]", response)
         if not pred_match:
             return None
-    
+
     indset_str = pred_match.group(1).strip()
     try:
         predicted_indset = [int(x.strip()) for x in indset_str.split(",")]
@@ -249,7 +249,7 @@ def optimality_reward_func_cvrp(completions, ground_truth, instance_coords, inst
     scores = []
     responses = completions
     feasible_rewards = feasibility_reward_func_cvrp(completions, instance_coords, instance_demands, instance_capacity)
-    
+
 
     for i, (response, is_feasible) in enumerate(zip(responses, feasible_rewards)):
         if is_feasible < 0.99:
@@ -287,13 +287,13 @@ def optimality_reward_func_cvrp(completions, ground_truth, instance_coords, inst
 def feasibility_reward_func_mvc(completions, instance, **kwargs) -> list[float]:
     """
     Calculate the feasibility reward for the Minimum Vertex Cover (MVC) problem with more granular feedback.
-    
+
     Returns a score between 0 and 1 based on how close the solution is to feasibility.
-    
+
     For MVC, feasibility requires every edge to be covered by at least one vertex in the cover set.
     """
     scores = []
-    
+
     for i, response in enumerate(completions):
         # Assign weights to different feasibility aspects
         weights = {
@@ -302,26 +302,26 @@ def feasibility_reward_func_mvc(completions, instance, **kwargs) -> list[float]:
         }
         score = 0.0
         predicted_cover = parse_solution_mis(response)
-        
+
         if predicted_cover is None:
             scores.append(0.0)
             continue
-            
+
         # Solution can be parsed
         score += weights["parse"]
-        
+
         # Convert to set for faster lookups
         cover_set = set(predicted_cover)
-        
+
         # Check edge coverage: every edge must be covered by at least one vertex
         edges_mvc = instance[i]['edges']
-        
+
         # Count uncovered edges
         uncovered = 0
         for u, v in edges_mvc:
             if u not in cover_set and v not in cover_set:
                 uncovered += 1
-        
+
         # Calculate edge coverage score
         if uncovered == 0:
             # Perfect coverage
@@ -331,45 +331,45 @@ def feasibility_reward_func_mvc(completions, instance, **kwargs) -> list[float]:
             # coverage_ratio = 1.0 - (uncovered / max(1, len(edges_mvc)))
             # score += weights["edge_coverage"] * coverage_ratio
             score = 0.0  # No credit for uncovered edges
-            
+
         scores.append(score)
-    
+
     return scores
 
 
 def optimality_reward_func_mvc(completions, ground_truth, instance, **kwargs) -> list[float]:
     """
     Calculate the optimality reward for the Minimum Vertex Cover (MVC) problem with improved gradient.
-    
+
     The optimality is measured by the size of the vertex cover compared to the optimal solution.
     For MVC, smaller covers are better.
     """
     scores = []
     feasibility_scores = feasibility_reward_func_mvc(completions, instance)
-    
+
     for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
         # If solution has very low feasibility score, give minimal optimality reward
         if feasibility_score < 0.9:  # MVC requires high feasibility to be meaningful
             scores.append(0)
             continue
-        
+
         predicted_cover = parse_solution_mis(response)
         if predicted_cover is None:
             scores.append(0.0)
             continue
-        
+
         try:
             # Size of the predicted cover
             pred_cover_size = len(set(predicted_cover))
-            
+
             # Parse the reference (optimal) objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", ground_truth[i])
             if not label_obj_match:
                 scores.append(0.0)
                 continue
-                
+
             optimal_cover_size = float(label_obj_match.group(1))
-            
+
             # For MVC, smaller is better, so calculate the inverse ratio with smoothing
             if pred_cover_size < optimal_cover_size:
                 # If prediction is better than ground truth (rare but possible), give full score
@@ -378,13 +378,13 @@ def optimality_reward_func_mvc(completions, ground_truth, instance, **kwargs) ->
                 # Calculate gap-based score with a smooth function
                 gap = (pred_cover_size - optimal_cover_size) / max(1.0, optimal_cover_size)
                 score = 1.0 / (1.0 + gap)
-            
+
             scores.append(score)
-            
+
         except Exception as e:
             # Error in calculating sizes
             scores.append(0.0)
-    
+
     return scores
 
 
@@ -392,16 +392,16 @@ def optimality_reward_func_mvc(completions, ground_truth, instance, **kwargs) ->
 def feasibility_reward_func_tsp(completions, instance, **kwargs):
     """
     Calculate the feasibility reward for the TSP with more granular feedback.
-    
+
     Returns a score between 0 and 1 based on how close the solution is to feasibility.
-    
+
     The infeasibility possibilities are:
     1. The route is not given or cannot be parsed
     2. The route does not visit all nodes exactly once
     3. The route is not a complete tour (doesn't return to start)
     """
     scores = []
-    
+
     for i, response in enumerate(completions):
         # Assign weights to different feasibility aspects
         weights = {
@@ -409,27 +409,27 @@ def feasibility_reward_func_tsp(completions, instance, **kwargs):
             "visit_all_nodes": 0.5,     # All nodes visited exactly once
             "complete_tour": 0.3        # Tour returns to starting point
         }
-        
+
         score = 0.0
         tour_list = parse_solution_op(response)
-        
+
         if tour_list is None:
             scores.append(0.0)
             continue
-            
+
         # Solution can be parsed
         score += weights["parse"]
-        
+
         # Check if all nodes are visited exactly once
         n_nodes = len(instance[i])
         unique_nodes = set(tour_list)
-        
+
         # Remove the duplicate start/end node for proper counting
         if len(tour_list) > 0 and tour_list[0] == tour_list[-1]:
             nodes_in_tour = len(tour_list) - 1
         else:
             nodes_in_tour = len(tour_list)
-        
+
         # Check uniqueness - each node should appear exactly once except start/end
         if len(unique_nodes) == nodes_in_tour and nodes_in_tour == n_nodes:
             score += weights["visit_all_nodes"]
@@ -437,103 +437,103 @@ def feasibility_reward_func_tsp(completions, instance, **kwargs):
             # Partial credit based on coverage ratio
             coverage_ratio = min(1.0, len(unique_nodes) / n_nodes)
             score += weights["visit_all_nodes"] * coverage_ratio
-        
+
         # Check if tour returns to starting point
         if len(tour_list) >= 2 and tour_list[0] == tour_list[-1]:
             score += weights["complete_tour"]
-        
+
         scores.append(score)
-    
+
     return scores
 
 def optimality_reward_func_tsp(completions, ground_truth, instance, **kwargs):
     """
     Calculate the optimality reward for the TSP with improved gradient.
-    
+
     The optimality is measured by the total tour distance compared to the optimal solution.
     """
     scores = []
     feasibility_scores = feasibility_reward_func_tsp(completions, instance)
-    
+
     for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
         # If solution has very low feasibility score, give minimal optimality reward
         if feasibility_score < 0.9:  # TSP requires high feasibility to be meaningful
             # Give a very small proportional reward to guide learning
             scores.append(0.1 * feasibility_score)
             continue
-        
+
         tour_list = parse_solution_op(response)
         if tour_list is None:
             scores.append(0.0)
             continue
-        
+
         try:
             # Calculate tour distance
             distance_matrix = compute_euclidean_distance_matrix(np.array(instance[i]))
             llm_distance = calculate_total_distance(tour_list, distance_matrix)
-            
+
             # Parse the reference (optimal) objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", ground_truth[i])
             if not label_obj_match:
                 scores.append(0.0)
                 continue
-                
+
             solution_distance = float(label_obj_match.group(1))
-            
+
             # Compute gap ratio
             gap = (llm_distance - solution_distance) / solution_distance
-            
+
             # Use a smoother function to map gap to [0, 1]
             # This provides more gradient for improvement
             score = max(0.0, 1.0 / (1.0 + gap))
-            
+
             scores.append(score)
-            
+
         except Exception as e:
             # Error in calculating distances
             scores.append(0.0)
-    
+
     return scores
 
 def feasibility_reward_func_mis(completions, instance, **kwargs):
     """
     Calculate the feasibility reward for the Maximum Independent Set (MIS) problem with more granular feedback.
-    
+
     Returns a score between 0 and 1 based on how close the solution is to feasibility.
-    
+
     For MIS, feasibility requires no two vertices in the set to be adjacent.
     """
     scores = []
-    
+
     for i, response in enumerate(completions):
         # Assign weights to different feasibility aspects
         weights = {
             "parse": 0.2,               # Solution can be parsed correctly
             "independence": 0.8,        # No adjacent vertices in the set
         }
-        
+
         score = 0.0
         predicted_indset = parse_solution_mis(response)
-        
+
         if predicted_indset is None:
             scores.append(0.0)
             continue
-            
+
         # Solution can be parsed
         score += weights["parse"]
-        
+
         # Convert to set for faster lookups
         indset = set(predicted_indset)
-        
+
         # Check independence: no two vertices should be adjacent
         edges_mis = instance[i]['edges']
-        
+
         # Count violations of independence
         violations = 0
         for u, v in edges_mis:
             if u in indset and v in indset:
                 violations += 1
-        
+
         # Calculate independence score
         if violations == 0:
             # Perfectly independent
@@ -543,25 +543,25 @@ def feasibility_reward_func_mis(completions, instance, **kwargs):
             # Calculate maximum possible violations
             total_edges = len(edges_mis)
             max_violations = min(total_edges, len(indset) * (len(indset) - 1) // 2)
-            
+
             # If there are potential violations, calculate a proportion
             if max_violations > 0:
                 independence_ratio = max(0, 1 - (violations / max_violations))
                 score += weights["independence"] * independence_ratio
-            
+
         scores.append(score)
-    
+
     return scores
 
 def optimality_reward_func_mis(completions, ground_truth, instance, **kwargs):
     """
     Calculate the optimality reward for the Maximum Independent Set (MIS) problem with improved gradient.
-    
+
     The optimality is measured by the size of the independent set compared to the optimal solution.
     """
     scores = []
     feasibility_scores = feasibility_reward_func_mis(completions, instance)
-    
+
     for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
         # If solution has very low feasibility score, give minimal optimality reward
         if feasibility_score < 0.9:  # MIS requires high feasibility to be meaningful
@@ -569,33 +569,33 @@ def optimality_reward_func_mis(completions, ground_truth, instance, **kwargs):
             # scores.append(0.1 * feasibility_score)
             scores.append(0.0)
             continue
-        
+
         predicted_indset = parse_solution_mis(response)
         if predicted_indset is None:
             scores.append(0.0)
             continue
-        
+
         try:
             # Size of the predicted independent set
             pred_indset_size = len(set(predicted_indset))
-            
+
             # Parse the reference (optimal) objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", ground_truth[i])
             if not label_obj_match:
                 scores.append(0.0)
                 continue
-                
+
             optimal_indset_size = float(label_obj_match.group(1))
-            
+
             # For MIS, larger is better, so the ratio is the score
             ratio = pred_indset_size / max(1.0, optimal_indset_size)
-            
+
             scores.append(ratio)
-            
+
         except Exception as e:
             # Error in calculating sizes
             scores.append(0.0)
-    
+
     return scores
 
 def parse_solution_jssp(response):
@@ -603,14 +603,14 @@ def parse_solution_jssp(response):
     schedule_match = re.search(r"Schedule:\s*(\[\[.+?\]\])", response, re.DOTALL)
     if not schedule_match:
         return None
-    
+
     makespan_match = re.search(r"Makespan:\s*(\d+)", response)
     if not makespan_match:
         return None
-    
+
     schedule_str = schedule_match.group(1)
     makespan_str = makespan_match.group(1)
-    
+
     try:
         # Convert string representation of schedule to a list of lists
         schedule = ast.literal_eval(schedule_str)
@@ -622,16 +622,16 @@ def parse_solution_jssp(response):
 def feasibility_reward_func_jssp(completions, instance, **kwargs):
     """
     Calculate the feasibility reward for the Job Shop Scheduling Problem (JSSP).
-    
+
     For JSSP, the solution must satisfy:
     1. Each job must have all its operations scheduled
     2. Operations of a job must be processed in order
     3. Each machine can process only one job at a time
-    
+
     Returns a score between 0 and 1 based on how close the solution is to feasibility.
     """
     scores = []
-    
+
     for i, response in enumerate(completions):
         # Assign weights to different feasibility aspects
         weights = {
@@ -640,22 +640,22 @@ def feasibility_reward_func_jssp(completions, instance, **kwargs):
             "machine_validity": 0.2,  # No machine conflicts
             "precedence": 0.4,    # Operations of a job processed in order
         }
-        
+
         score = 0.0
         parsed_solution = parse_solution_jssp(response)
-        
+
         if parsed_solution is None:
             scores.append(0.0)
             continue
-            
+
         # Solution can be parsed
         score += weights["parse"]
-        
+
         schedule = parsed_solution["schedule"]
-        
+
         # Get the instance data for this example
         instance_arr = np.array(instance[i])
-        
+
         # Check job coverage: all jobs should appear exactly once in each machine's schedule
         try:
             n_jobs = int(instance_arr['n'])
@@ -664,90 +664,90 @@ def feasibility_reward_func_jssp(completions, instance, **kwargs):
             # For the case where instance is numpy array
             n_jobs = instance_arr.shape[0]
             n_machines = instance_arr.shape[1] // 2
-        
+
         # Check if the number of machines in the solution matches the instance
         if len(schedule) != n_machines:
             scores.append(score)  # Only get points for parsing
             continue
-        
+
         # Check if all jobs are scheduled on all machines
         all_jobs_scheduled = True
         for machine_schedule in schedule:
             if len(machine_schedule) != n_jobs or set(machine_schedule) != set(range(n_jobs)):
                 all_jobs_scheduled = False
                 break
-                
+
         if all_jobs_scheduled:
             score += weights["job_coverage"]
-        
+
         # Check machine validity - no overlapping operations on same machine
-        # This is inherently satisfied by the schedule format, as each machine 
+        # This is inherently satisfied by the schedule format, as each machine
         # processes jobs sequentially. We're primarily checking if the schedule format is valid.
         valid_machine_scheduling = all(len(machine_schedule) == n_jobs for machine_schedule in schedule)
-        
+
         if valid_machine_scheduling:
             score += weights["machine_validity"]
-            
+
         # Check precedence constraints using get_makespan function from utils
         try:
             # Get the real makespan which automatically checks precedence constraints
             real_makespan = get_makespan(instance_arr, schedule)
-            
+
             # If get_makespan returns a number (not "infeasible"), the schedule respects precedence constraints
             if real_makespan != "infeasible":
                 score += weights["precedence"]
         except Exception as e:
             # Error in get_makespan likely means precedence constraints are violated
             pass  # No additional points for precedence
-        
+
         scores.append(score)
-    
+
     return scores
 
 def optimality_reward_func_jssp(completions, ground_truth, instance, **kwargs):
     """
     Calculate the optimality reward for the Job Shop Scheduling Problem (JSSP).
-    
+
     The optimality is measured by the makespan compared to the optimal solution.
     For JSSP, shorter makespan is better.
     """
     scores = []
     feasibility_scores = feasibility_reward_func_jssp(completions, instance)
-    
+
     for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
         # If solution is not feasible, give no optimality reward
         if feasibility_score < 0.99:  # JSSP requires high feasibility to be meaningful
             scores.append(0.0)
             continue
-        
+
         parsed_solution = parse_solution_jssp(response)
         if parsed_solution is None:
             scores.append(0.0)
             continue
-            
+
         try:
             # Get the instance data for this example
             instance_arr = np.array(instance[i])
-            
+
             # Get the schedule from parsed solution
             schedule = parsed_solution["schedule"]
-            
+
             # Calculate the real makespan using the get_makespan function from utils
             real_makespan = get_makespan(instance_arr, schedule)
-            
+
             # Check if the schedule is feasible
             if real_makespan == "infeasible":
                 scores.append(0.0)
                 continue
-                
+
             # Parse the reference (optimal) makespan
             label_makespan_match = re.search(r"Makespan:\s*(\d+)", ground_truth[i])
             if not label_makespan_match:
                 scores.append(0.0)
                 continue
-                
+
             optimal_makespan = float(label_makespan_match.group(1))
-            
+
             # For JSSP, shorter makespan is better, so calculate inverse ratio
             if real_makespan < optimal_makespan:
                 # If prediction is better than ground truth (rare but possible), give full score
@@ -756,12 +756,142 @@ def optimality_reward_func_jssp(completions, ground_truth, instance, **kwargs):
                 # Calculate gap-based score with a smooth function
                 gap = (real_makespan - optimal_makespan) / max(1.0, optimal_makespan)
                 score = 3*1.0 / (1.0 + gap)
-                
+
             scores.append(score)
-            
+
         except Exception as e:
             # Error in calculating makespan
             scores.append(0.0)
-    
+
+    return scores
+
+
+# ---------------------------------------------------------------------------
+# Traffic Engineering (TE) reward functions
+# ---------------------------------------------------------------------------
+
+def parse_solution_te(response):
+    """Parse a TE routing from the LLM response.
+
+    Returns a list of integers (path indices) or None if parsing fails.
+    Accepts both ``<routing> i,j,k </routing>`` and loose comma-separated
+    integers as a fallback.
+    """
+    m = re.search(r"<routing>(.*?)</routing>", response, re.DOTALL | re.IGNORECASE)
+    raw = m.group(1) if m else None
+    if raw is None:
+        return None
+    try:
+        indices = [int(x.strip()) for x in raw.split(",") if x.strip()]
+        return indices if indices else None
+    except ValueError:
+        return None
+
+
+def feasibility_reward_func_te(completions, ground_truth, **kwargs):
+    """Feasibility reward for Traffic Engineering.
+
+    Checks three properties and assigns partial scores:
+
+    * **parse** (0.3): the ``<routing>`` tag is present and parseable.
+    * **length** (0.5): the routing contains the expected number of OD-pair
+      indices, inferred from the ground-truth routing.
+    * **non_negative** (0.2): all path indices are ≥ 0.
+    """
+    scores = []
+
+    for i, response in enumerate(completions):
+        weights = {"parse": 0.3, "length": 0.5, "non_negative": 0.2}
+        score = 0.0
+
+        routing = parse_solution_te(response)
+        if routing is None:
+            scores.append(0.0)
+            continue
+
+        # Solution can be parsed
+        score += weights["parse"]
+
+        # Infer expected number of OD pairs from the ground-truth routing
+        gt_routing = parse_solution_te(ground_truth[i])
+        expected_n = len(gt_routing) if gt_routing is not None else None
+
+        if expected_n is None:
+            # Cannot verify length; give half credit
+            score += weights["length"] * 0.5
+        elif len(routing) == expected_n:
+            score += weights["length"]
+        else:
+            # Partial credit proportional to how close the length is
+            ratio = min(len(routing), expected_n) / max(len(routing), expected_n)
+            score += weights["length"] * ratio
+
+        # All indices must be non-negative
+        if all(idx >= 0 for idx in routing):
+            score += weights["non_negative"]
+
+        scores.append(score)
+
+    return scores
+
+
+def optimality_reward_func_te(completions, ground_truth, **kwargs):
+    """Optimality reward for Traffic Engineering.
+
+    Compares the objective value *reported* in the completion against the
+    LP-optimal objective stored in the ground-truth label.
+
+    * **total_flow** (higher is better): ``score = min(1, pred / optimal)``
+    * **min_max_link_util / MLU** (lower is better):
+      ``score = 1 / (1 + max(0, (pred - optimal) / optimal))``
+
+    The objective type is detected automatically from the ground-truth label
+    (looks for ``"Total Flow:"`` or ``"MLU:"``).  Only completions that pass
+    the feasibility threshold (≥ 0.8) receive an optimality score.
+    """
+    scores = []
+    feasibility_scores = feasibility_reward_func_te(completions, ground_truth)
+
+    for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
+        if feasibility_score < 0.8:
+            scores.append(0.0)
+            continue
+
+        gt = ground_truth[i]
+
+        # Detect objective type from the ground-truth label
+        gt_tf_match  = re.search(r"Total Flow:\s*([\d.]+)", gt)
+        gt_mlu_match = re.search(r"MLU:\s*([\d.]+)", gt)
+
+        if gt_tf_match:
+            # total_flow — higher is better
+            optimal_obj = float(gt_tf_match.group(1))
+            pred_match  = re.search(r"Total Flow:\s*([\d.]+)", response)
+            if not pred_match:
+                scores.append(0.0)
+                continue
+            pred_obj = float(pred_match.group(1))
+            score = min(1.0, pred_obj / max(1e-6, optimal_obj))
+            scores.append(score)
+
+        elif gt_mlu_match:
+            # min_max_link_util — lower is better
+            optimal_obj = float(gt_mlu_match.group(1))
+            pred_match  = re.search(r"MLU:\s*([\d.]+)", response)
+            if not pred_match:
+                scores.append(0.0)
+                continue
+            pred_obj = float(pred_match.group(1))
+            if optimal_obj <= 0.0:
+                scores.append(0.0)
+                continue
+            gap   = max(0.0, (pred_obj - optimal_obj) / optimal_obj)
+            score = 1.0 / (1.0 + gap)
+            scores.append(score)
+
+        else:
+            # Cannot detect objective type
+            scores.append(0.0)
+
     return scores
 

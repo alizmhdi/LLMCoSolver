@@ -141,7 +141,7 @@ def train_model(args):
 
     # Get data - now using the function from utils.py
     train_dataset, eval_dataset = get_dataset(problem, tokenizer)
-    
+
     # =========================
     # Create the Trainer
     # =========================
@@ -157,9 +157,11 @@ def train_model(args):
         reward_funcs = [optimality_reward_func_mis, feasibility_reward_func_mis]
     elif args.problem == 'jssp':
         reward_funcs = [optimality_reward_func_jssp, feasibility_reward_func_jssp]
+    elif args.problem == 'te':
+        reward_funcs = [optimality_reward_func_te, feasibility_reward_func_te]
     else:
         raise ValueError("Problem not supported for reward functions.")
-    
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
@@ -197,7 +199,7 @@ def train_model(args):
             save_steps=args.save_step,
         )
     )
-    
+
 
     # =========================
     # Train
