@@ -5,6 +5,7 @@ from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from transformers import TrainingArguments, TrainerCallback, DataCollatorForLanguageModeling
+from transformers.trainer_utils import get_last_checkpoint
 import re
 from utils import *
 import os
@@ -23,18 +24,18 @@ class SafeDataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
         super().__init__(tokenizer=tokenizer, mlm=mlm)
         self.response_template = response_template
         self.tokenizer = tokenizer
-        
+
         # Tokenize the template once to improve efficiency
         self.response_template_ids = tokenizer.encode(response_template, add_special_tokens=False)
         self.fallback_strategy = fallback_strategy
-        
+
     def torch_call(self, examples):
         batch = super().torch_call(examples)
-        
+
         # Process each example in the batch
         for i in range(len(batch["input_ids"])):
             input_ids = batch["input_ids"][i].tolist()
-            
+
             # Try to find the template in the input
             template_found = False
             for idx in range(len(input_ids) - len(self.response_template_ids) + 1):
@@ -44,11 +45,11 @@ class SafeDataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
                     response_start_idx = idx + len(self.response_template_ids)
                     batch["labels"][i, :response_start_idx] = -100
                     break
-            
+
             # Handle case where template is not found
             if not template_found:
                 warnings.warn(f"Response template not found in example {i}")
-                
+
                 if self.fallback_strategy == "last_portion":
                     # Use the last 10% of tokens for loss computation
                     seq_length = len(input_ids)
@@ -56,15 +57,15 @@ class SafeDataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
                     # Only compute loss on the last portion
                     batch["labels"][i, :start_pos] = -100
                     # Keep labels for the remaining portion
-                
+
                 elif self.fallback_strategy == "full_example":
                     # Use the entire example as-is (fallback to regular LM training)
                     pass  # Labels are already set to input_ids by the parent collator
-                
+
                 elif self.fallback_strategy == "skip":
                     # Skip this example completely by setting all labels to -100
                     batch["labels"][i, :] = -100
-        
+
         return batch
 
 def parse_args() -> argparse.Namespace:
@@ -118,22 +119,28 @@ def parse_args() -> argparse.Namespace:
     # Output and evaluation
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory name')
     parser.add_argument('--eval_steps', type=int, default=1000, help='Steps interval to evaluate the model')
+    parser.add_argument('--num_nodes', type=int, default=None,
+                        help='Keep only instances with this many cities/nodes (e.g. 10)')
+    parser.add_argument('--max_train_samples', type=int, default=None,
+                        help='Cap the number of training examples after filtering')
+    parser.add_argument('--max_eval_samples', type=int, default=None,
+                        help='Cap the number of eval examples after filtering')
 
     args = parser.parse_args()
 
     return args
 
 
-def get_dataset(tokenizer, problem):
+def get_dataset(tokenizer, problem, num_nodes=None, max_train_samples=None, max_eval_samples=None):
     # Define the Alpaca-style prompt template
-    alpaca_prompt = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance. 
+    alpaca_prompt = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance.
     Your task is to produce a feasible solution that optimizes (minimizes or maximizes) the given objective.
 
-    ### Instruction:{}
+### Instruction:{}
 
-    ### Input:{}
+### Input:{}
 
-    ### Response:{}"""
+### Response:{}"""
     EOS_TOKEN = tokenizer.eos_token
 
     def formatting_prompts_func(examples):
@@ -153,14 +160,24 @@ def get_dataset(tokenizer, problem):
     # put the data in the data folder
     # Load training dataset from its own directory
     train_dataset = load_dataset('./data/' + problem + '/train', split="train", cache_dir="../datasets").shuffle(seed=42)
-    train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
+    eval_dataset = load_dataset('./data/' + problem + '/eval', split="test", cache_dir="../datasets")
 
-    # Load evaluation dataset from its own directory
-    eval_dataset = load_dataset('./data/' + problem + '/eval', split="test", cache_dir="../datasets") 
+    if num_nodes is not None:
+        train_dataset = train_dataset.filter(lambda x: int(x["num_nodes"]) == num_nodes)
+        eval_dataset = eval_dataset.filter(lambda x: int(x["num_nodes"]) == num_nodes)
+        print(f"Filtered to num_nodes={num_nodes}: train={len(train_dataset)}, eval={len(eval_dataset)}")
+
+    if max_train_samples is not None and len(train_dataset) > max_train_samples:
+        train_dataset = train_dataset.select(range(max_train_samples))
+    if max_eval_samples is not None and len(eval_dataset) > max_eval_samples:
+        eval_dataset = eval_dataset.select(range(max_eval_samples))
+
+    train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
     eval_dataset = eval_dataset.map(formatting_prompts_func, batched=True)
 
     # instances = load_pkl_dataset('./data/' + problem + '/instances.pkl')
     instances = None
+    print(f"Using train={len(train_dataset)}, eval={len(eval_dataset)}")
     print(train_dataset[0])
 
     return train_dataset, eval_dataset, instances
@@ -185,7 +202,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
 
         # Extract the solution part from the gold/label text
         label_solution = extract_predicted_solution(labels[i])
-        
+
 
         if problem == "tsp":
             # Parse route from the label
@@ -287,12 +304,12 @@ def compute_metric_cop(predictions, labels, instances, problem):
             if not all(isinstance(r, list) for r in predicted_routes):
                 infeasibility += 1
                 continue
-            
+
 
             # 1) Capacity check & route start/end check
             any_route_infeasible = False
             distance_matrix = compute_euclidean_distance_matrix(locs)
-            
+
             try:
                 for route in predicted_routes:
                     # Must start/end at depot 0
@@ -326,7 +343,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             if visited_customers != required_customers:
                 infeasibility += 1
                 continue
-            
+
             # 3) Parse reference objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", label_solution)
             if not label_obj_match:
@@ -389,7 +406,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             pred_cover_size = len(cover_set)
             gap = (pred_cover_size - optimal_cover_size) / (optimal_cover_size if optimal_cover_size != 0 else 1e-9)
             gaps.append(gap)
-            
+
         elif problem == "mis":
             # 1) Parse predicted independent set from "Set: [ ... ]"
             pred_match = re.search(r"Response:\s*\[([^\]]+)\]", prediction_solution)
@@ -411,14 +428,14 @@ def compute_metric_cop(predictions, labels, instances, problem):
             # instance structure is expected to be (num_nodes, edges, ...)
             edges_mis = instances[i][1]  # edges is the second element
             indset = set(predicted_indset)
-            
+
             # Check if any pair of vertices in the independent set are adjacent
             is_independent = True
             for (u, v) in edges_mis:
                 if u in indset and v in indset:
                     is_independent = False
                     break
-                    
+
             if not is_independent:
                 infeasibility += 1
                 continue
@@ -437,7 +454,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             pred_indset_size = len(indset)
             gap = (optimal_indset_size - pred_indset_size) / (optimal_indset_size if optimal_indset_size != 0 else 1e-9)
             gaps.append(gap)
-        
+
         elif problem == "pfsp":
             # Parse the predicted job order
             pred_match = re.search(r"Order:\s*\[([^\]]+)\]", prediction_solution)
@@ -456,11 +473,11 @@ def compute_metric_cop(predictions, labels, instances, problem):
             # Extract instance data
             n_jobs = instances[i].shape[0]
             m_machines = instances[i].shape[1]
-            
+
             # Parse processing times
             processing_times = instances[i].T
-            
-            
+
+
             # Check if the job order contains all jobs exactly once
             expected_jobs = set(range(1, n_jobs + 1))  # Jobs are 1-indexed
             if set(job_order) != expected_jobs or len(job_order) != n_jobs:
@@ -473,10 +490,10 @@ def compute_metric_cop(predictions, labels, instances, problem):
                 infeasibility += 1
                 continue
             optimal_makespan = float(label_obj_match.group(1))
-            
+
             # Calculate the makespan for the predicted job order
             predicted_makespan = calculate_pfsp_makespan(job_order, processing_times, m_machines)
-            
+
             # Calculate optimality gap
             gap = (predicted_makespan - optimal_makespan) / optimal_makespan
             gaps.append(gap)
@@ -612,7 +629,6 @@ def train_model(args):
         max_seq_length=args.max_seq_length,
         dtype=dtype,
         load_in_4bit=args.load_in_4bit,
-        cache_dir="/gpfs/work4/0/prjs0685/cache"
     )
     # model = model.to("cuda")
 
@@ -637,15 +653,20 @@ def train_model(args):
         use_rslora=args.use_rslora,
         loftq_config=args.loftq_config
     )
-    
+
 
     collator = SafeDataCollatorForCompletionOnlyLM(
-        response_template="### Response:", 
+        response_template="### Response:",
         tokenizer=tokenizer,
         fallback_strategy="full_example"  # Options: "last_portion", "full_example", "skip"
     )
     # Get data
-    train_dataset, eval_dataset, instances = get_dataset(tokenizer, problem)
+    train_dataset, eval_dataset, instances = get_dataset(
+        tokenizer, problem,
+        num_nodes=args.num_nodes,
+        max_train_samples=args.max_train_samples,
+        max_eval_samples=args.max_eval_samples,
+    )
     # print(train_dataset[0:8])
 
     # =========================
@@ -690,8 +711,8 @@ def train_model(args):
     # =========================
     # Train
     # =========================
-    trainer.train(resume_from_checkpoint=True)
-    # trainer.train()
+    checkpoint = get_last_checkpoint(dir_out)
+    trainer.train(resume_from_checkpoint=checkpoint)
 
     return trainer
 

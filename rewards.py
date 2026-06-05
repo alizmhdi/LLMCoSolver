@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import ast
 from utils import calculate_total_distance, compute_euclidean_distance_matrix, load_pkl_dataset, get_makespan

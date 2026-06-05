@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import json
 import random
 import pickle
-import elkai
 import numpy as np
 import torch
 from scipy.spatial import cKDTree, distance
@@ -105,6 +106,8 @@ def lkh(problem: torch.Tensor) -> tuple[list[int], float]:
         A tuple where the first element is the best tour (list of node indices),
         and the second is the total distance of that tour.
     """
+    import elkai  # optional; only required for LKH ground-truth labelling
+
     if isinstance(problem, torch.Tensor):
         locations = problem.detach().cpu().numpy()
     else:
@@ -184,6 +187,62 @@ def calculate_top_k_nearest_nodes(nodes: np.ndarray, k: int = 2) -> list[list[tu
     return top_k_nearest_nodes
 
 
+def parse_tsp_route(response: str):
+    """Parse ``Route: [0, 1, 2, ...]`` from an LLM completion (TSP training format)."""
+    import re
+
+    match = re.search(r"Route:\s*\[([^\]]+)\]", response or "")
+    if not match:
+        return None
+    try:
+        return [int(x.strip()) for x in match.group(1).split(",")]
+    except ValueError:
+        return None
+
+
+def build_tsp_prompt_fields(instance, k_nn=2):
+    """Build instruction and input text for a TSP instance (no LKH / elkai).
+
+    Used by MetaRL inference and by :func:`tag_prompt_and_transform_to_json`.
+    """
+    if isinstance(instance, torch.Tensor):
+        nodes = instance.detach().cpu().numpy()
+        coord_at = lambda i: instance[i].tolist()
+    else:
+        nodes = np.asarray(instance)
+        coord_at = lambda i: nodes[i].tolist()
+
+    p_size = nodes.shape[0]
+    instruction = (
+        f"Solve the Traveling Salesman Problem (TSP) for the given list of {p_size} cities. "
+        "Each city is represented as a node with coordinates (x, y). "
+        "Identify the shortest route that visits every city exactly once and returns to the starting city. "
+        f"The input includes city coordinates, the {k_nn} nearest neighbors for each city, and their respective distances. "
+        "Provide the solution in the following format:\n\n"
+        "1. Route: List the nodes in the order they are visited.\n"
+        "2. Objective: The objective value (total travel distance)."
+    )
+
+    nns = calculate_top_k_nearest_nodes(nodes, k_nn)
+    nodes_description = []
+    for i in range(p_size):
+        neighbor_str = [f"{n[0]}: {n[1]:.1f}" for n in nns[i]]
+        node_desc = (
+            f"Node {i}, coordinates: {coord_at(i)}, "
+            f"neighbors: {neighbor_str};"
+        ).replace("\'", "")
+        nodes_description.append(node_desc)
+
+    input_text = "".join(nodes_description)
+    input_text = ".".join(input_text.rsplit(";", 1))
+
+    return {
+        "num_nodes": str(p_size),
+        "instruction": instruction,
+        "input": input_text,
+    }
+
+
 def tag_prompt_and_transform_to_json(instance, k_nn=2):
     """
 
@@ -196,42 +255,13 @@ def tag_prompt_and_transform_to_json(instance, k_nn=2):
     Returns:
         dict: JSON-ready dictionary containing the TSP instance description with all numerical results as text.
     """
-    p_size = instance.shape[0]
-    instruction = (
-        f"Solve the Traveling Salesman Problem (TSP) for the given list of {p_size} cities. "
-        "Each city is represented as a node with coordinates (x, y). "
-        "Identify the shortest route that visits every city exactly once and returns to the starting city. "
-        f"The input includes city coordinates, the {k_nn} nearest neighbors for each city, and their respective distances. "
-        "Provide the solution in the following format:\n\n"
-        "1. Route: List the nodes in the order they are visited.\n"
-        "2. Objective: The objective value (total travel distance)."
-    )
+    tsp_json = build_tsp_prompt_fields(instance, k_nn=k_nn)
 
-    # Calculate nearest neighbors
-    nns = calculate_top_k_nearest_nodes(instance.cpu().numpy(), k_nn)
-    nodes_description = []
-    for i in range(p_size):
-        neighbor_str = [f"{n[0]}: {n[1]:.1f}" for n in nns[i]]
-        node_desc = (
-            f"Node {i}, coordinates: {instance[i].tolist()}, "
-            f"neighbors: {neighbor_str};"
-        ).replace("\'", "")
-        nodes_description.append(node_desc)
-
-    # Solve TSP and calculate total cost
+    # LKH optimal tour for training labels (requires elkai)
     tour, cost = lkh(instance)
-    output = "Route: " + str([node for node in tour]) + ", Objective: " + f"{cost:.3f}"
-
-    # Final JSON structure
-    tsp_json = {
-        "num_nodes": str(p_size),  # Convert to string
-        "instruction": instruction,
-        "output": output,
-        "input": ''.join(nodes_description),
-    }
-
-    tsp_json['input'] = ".".join(tsp_json['input'].rsplit(";", 1))
-
+    tsp_json["output"] = (
+        "Route: " + str([node for node in tour]) + ", Objective: " + f"{cost:.3f}"
+    )
 
     return tsp_json
 
