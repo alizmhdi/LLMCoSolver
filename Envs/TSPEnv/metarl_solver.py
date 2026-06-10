@@ -38,12 +38,37 @@ def build_prompt(coords, k_nn: int = 2) -> str:
     )
 
 
+def _validate_tsp_tour(tour: list[int] | None, n: int) -> list[int] | None:
+    """Return a feasible 0-indexed tour or None."""
+    if not tour:
+        return None
+
+    nodes = [int(x) for x in tour]
+
+    # LLM outputs are sometimes 1-indexed (1..n) instead of 0-indexed (0..n-1).
+    if all(1 <= idx <= n for idx in nodes):
+        nodes = [idx - 1 for idx in nodes]
+
+    if not all(0 <= idx < n for idx in nodes):
+        return None
+
+    if len(nodes) > 1 and nodes[0] == nodes[-1]:
+        visited = nodes[:-1]
+    else:
+        visited = nodes
+
+    if len(visited) != n or set(visited) != set(range(n)):
+        return None
+
+    return nodes
+
+
 def evaluate_completion(response: str, coords) -> tuple[float | None, np.ndarray | None]:
     """Parse an LLM completion and return (tour_length, tour)."""
     coords = np.asarray(coords, dtype=np.float64)
     n = len(coords)
-    tour = parse_tsp_route(response)
-    if tour is None or len(set(tour)) != n:
+    tour = _validate_tsp_tour(parse_tsp_route(response), n)
+    if tour is None:
         return None, None
     dist_matrix = compute_euclidean_distance_matrix(coords)
     length = float(calculate_total_distance(tour, dist_matrix))
@@ -63,8 +88,7 @@ def run_llmco_tsp(
     ----------
     coords : array-like, shape (N, 2)
     call_llm : Callable[[list[str]], list[str]]
-        Function mapping a list of prompts to LLM response strings
-        (e.g. ``opro.prompt_utils.call_vllm_server_func``).
+        Function mapping a list of prompts to LLM response strings.
 
     Returns
     -------

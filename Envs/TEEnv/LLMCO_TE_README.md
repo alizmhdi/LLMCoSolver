@@ -11,8 +11,8 @@ The pipeline has three stages:
 2. **Fine-tune the LLM** — run Supervised Fine-Tuning (SFT) with
    `LLMCO/main_train.py`, optionally followed by GRPO RL with
    `LLMCO/rl_train.py`.
-3. **Run MetaRL adversarial evaluation** — serve the fine-tuned model with
-   vLLM and plug `LLMCO` in as the MetaRL target solver.
+3. **Run MetaRL adversarial evaluation** — load the fine-tuned checkpoint
+   locally and plug `LLMCO` in as the MetaRL target solver.
 
 ---
 
@@ -22,8 +22,7 @@ The pipeline has three stages:
 |---|---|
 | `metarl` conda environment | `conda env create -f environment.yml` |
 | Gurobi licence | Required for the LP data-generation step |
-| GPU with ≥ 24 GB VRAM | For SFT / RL fine-tuning; CPU is fine for inference tests |
-| vLLM | Installed in the environment used to serve the model |
+| GPU with ≥ 24 GB VRAM | For SFT / RL fine-tuning and local inference |
 
 All shell commands below assume your working directory is **`MetaRL/src/`**
 unless otherwise noted.
@@ -155,34 +154,13 @@ conda run -n metarl python rl_train.py \
 
 ---
 
-## Step 3 — Serve the Model with vLLM
+## Step 3 — Run MetaRL Adversarial Evaluation
 
-The `LLMCOSolver` calls the vLLM OpenAI-compatible API.  Start the server
-before running MetaRL.
-
-### Serving the base model (no fine-tuning)
-
-```bash
-vllm serve Qwen/Qwen2.5-7B-Instruct \
-    --port 8001 \
-    --max-model-len 8192
-```
-
-### Serving a fine-tuned LoRA checkpoint
-
-```bash
-vllm serve unsloth/Qwen2.5-7B \
-    --enable-lora \
-    --lora-modules te-lora=problems/traffic_engineering/solvers/LLMCO/output_te_sft/checkpoint-XXXXX \
-    --port 8001 \
-    --max-model-len 8192
-```
-
-Then pass `--llmco_model te-lora` to the MetaRL command below.
+`LLMCOSolver` loads the fine-tuned checkpoint locally with HuggingFace
+(same as `eval.py`).  Point `--llmco_model_path` at your merged checkpoint
+or LoRA adapter directory under `LLMCO/`.
 
 ---
-
-## Step 4 — Run MetaRL Adversarial Evaluation
 
 From **`MetaRL/src/`**:
 
@@ -190,12 +168,13 @@ From **`MetaRL/src/`**:
 python main.py adversarial MetaRL TE LLMCO \
     --topo B4.json \
     --objective total_flow \
-    --llmco_vllm_url http://localhost:8001/v1 \
-    --llmco_model Qwen/Qwen2.5-7B-Instruct \
-    --llmco_num_samples 8 \
+    --llmco_model_path saved_models \
+    --llmco_eval_method best_of_n \
+    --llmco_best_of_n 8 \
     --llmco_temperature 0.7 \
-    --llmco_max_tokens 512 \
-    --num_actors 4 \
+    --llmco_max_tokens 3000 \
+    --device cpu \
+    --num_actors 1 \
     --timesteps 200 \
     --min_demand_element 25 \
     --max_demand_element 5000 \
@@ -208,17 +187,18 @@ python main.py adversarial MetaRL TE LLMCO \
 
 | Flag | Default | Description |
 |---|---|---|
-| `--llmco_vllm_url` | `http://localhost:8001/v1` | vLLM server base URL |
-| `--llmco_model` | `Qwen/Qwen2.5-7B-Instruct` | Model name as registered in vLLM |
-| `--llmco_num_samples` | `8` | Completions per `solve()` call (best-of-n) |
+| `--llmco_model_path` | `saved_models` | Checkpoint path (relative to `LLMCO/`) |
+| `--llmco_eval_method` | `best_of_n` | `vanilla` or `best_of_n` (eval.py) |
+| `--llmco_best_of_n` | `8` | Completions per `solve()` call |
 | `--llmco_temperature` | `0.7` | Sampling temperature |
-| `--llmco_max_tokens` | `512` | Max tokens per completion |
+| `--llmco_max_tokens` | `3000` | Max tokens per completion |
 | `--llmco_verbose` | `False` | Print per-call diagnostics (e.g. `1/8 valid routings`) |
 
-### Quick smoke test (1 step, no GPU)
+### Quick smoke test (1 step)
 
 ```bash
-CUDA_VISIBLE_DEVICES="" python main.py adversarial MetaRL TE LLMCO \
+python main.py adversarial MetaRL TE LLMCO \
+    --llmco_model_path saved_models \
     --topo B4.json \
     --objective total_flow \
     --num_actors 1 \

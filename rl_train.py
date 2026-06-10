@@ -74,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     # Output and evaluation
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory name')
     parser.add_argument('--eval_steps', type=int, default=100, help='Steps interval to evaluate the model')
+    add_node_filter_args(parser)
+    parser.add_argument('--max_train_samples', type=int, default=None,
+                        help='Cap the number of training examples after filtering')
+    parser.add_argument('--max_eval_samples', type=int, default=None,
+                        help='Cap the number of eval examples after filtering')
 
     args = parser.parse_args()
 
@@ -139,8 +144,15 @@ def train_model(args):
     )
 
 
-    # Get data - now using the function from utils.py
-    train_dataset, eval_dataset = get_dataset(problem, tokenizer)
+    train_dataset, eval_dataset = get_dataset(
+        problem,
+        tokenizer,
+        num_nodes=args.num_nodes,
+        min_nodes=args.min_nodes,
+        max_nodes=args.max_nodes,
+        max_train_samples=args.max_train_samples,
+        max_eval_samples=args.max_eval_samples,
+    )
 
     # =========================
     # Create the Trainer

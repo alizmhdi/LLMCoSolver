@@ -9,14 +9,14 @@ def parse_solution_jssp(response):
     schedule_match = re.search(r"Schedule:\s*(\[\[.+?\]\])", response, re.DOTALL)
     if not schedule_match:
         return None
-    
+
     makespan_match = re.search(r"Makespan:\s*(\d+)", response)
     if not makespan_match:
         return None
-    
+
     schedule_str = schedule_match.group(1)
     makespan_str = makespan_match.group(1)
-    
+
     try:
         # Convert string representation of schedule to a list of lists
         schedule = ast.literal_eval(schedule_str)
@@ -361,7 +361,7 @@ def feasibility_reward_func_mis(completions, instance, **kwargs) -> list[float]:
             # Could not parse the set properly
             scores.append(0.0)
             continue
-        
+
         # Check feasibility: no two vertices in the set should be adjacent
         edges_mis = instance[i]['edges']
 
@@ -410,7 +410,7 @@ def optimality_reward_func_mis(completions, ground_truth, instance, **kwargs) ->
 def feasibility_reward_func_pfsp(completions, instance, **kwargs) -> list[float]:
     """
     Calculate the feasibility reward for the Permutation Flowshop Scheduling Problem.
-    
+
     Returns 2.0 for feasible solutions, 0.0 otherwise.
     A solution is feasible if:
     1. The job order can be properly parsed
@@ -418,7 +418,7 @@ def feasibility_reward_func_pfsp(completions, instance, **kwargs) -> list[float]
     """
     scores = []
     responses = completions
-    
+
     for i, response in enumerate(responses):
         # Parse the job order
         pred_match = re.search(r"Order:\s*\[([^\]]+)\]", response)
@@ -426,7 +426,7 @@ def feasibility_reward_func_pfsp(completions, instance, **kwargs) -> list[float]
             # No job order found
             scores.append(0.0)
             continue
-            
+
         job_order_str = pred_match.group(1)
         try:
             job_order = list(map(int, job_order_str.split(", ")))
@@ -434,7 +434,7 @@ def feasibility_reward_func_pfsp(completions, instance, **kwargs) -> list[float]
             # Error in parsing job order
             scores.append(0.0)
             continue
-        
+
         # Get the number of jobs from instance
         try:
             # Try to get shape if instance is a numpy array
@@ -447,17 +447,17 @@ def feasibility_reward_func_pfsp(completions, instance, **kwargs) -> list[float]
         except:
             # If all else fails, use the length of the job order (not ideal)
             n_jobs = len(job_order)
-            
+
         # Check if all jobs are included exactly once
         expected_jobs = set(range(1, n_jobs + 1))  # Jobs are 1-indexed
-        
+
         if set(job_order) != expected_jobs or len(job_order) != n_jobs:
             scores.append(0.0)
             continue
-            
+
         # Solution is feasible
         scores.append(2.0)
-        
+
     return scores
 
 def optimality_reward_func_pfsp(completions, ground_truth, instance, **kwargs) -> list[float]:
@@ -468,18 +468,18 @@ def optimality_reward_func_pfsp(completions, ground_truth, instance, **kwargs) -
     scores = []
     responses = completions
     feasible_rewards = feasibility_reward_func_pfsp(completions, instance)
-    
+
     for i, (response, is_feasible) in enumerate(zip(responses, feasible_rewards)):
         if is_feasible != 2.0:
             # Infeasible solution
             scores.append(0.0)
             continue
-            
+
         # Parse the job order
         pred_match = re.search(r"Order:\s*\[([^\]]+)\]", response)
         job_order_str = pred_match.group(1)
         job_order = list(map(int, job_order_str.split(", ")))
-        
+
         # Get processing times and calculate makespan
         try:
             # Try to convert the instance to numpy array if it's not already
@@ -489,18 +489,18 @@ def optimality_reward_func_pfsp(completions, ground_truth, instance, **kwargs) -
                 # If it's a list or other format, convert to numpy array
                 inst_array = np.array(instance[i])
                 processing_times = inst_array.T
-                
+
             m_machines = processing_times.shape[0]
             predicted_makespan = calculate_pfsp_makespan(job_order, processing_times, m_machines)
-            
+
             # Parse the reference (optimal) objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", ground_truth[i])
             if not label_obj_match:
                 scores.append(0.0)
                 continue
-                
+
             optimal_makespan = float(label_obj_match.group(1))
-            
+
             # Compute gap = (predicted_makespan - optimal_makespan) / optimal_makespan
             # Convert to a score between 0 and 1
             gap = (predicted_makespan - optimal_makespan) / optimal_makespan
@@ -509,23 +509,23 @@ def optimality_reward_func_pfsp(completions, ground_truth, instance, **kwargs) -
             # Error in calculation
             print(f"Error calculating makespan: {e}")
             scores.append(0.0)
-        
+
     return scores
 
 
 def feasibility_reward_func_jssp(completions, instance, **kwargs):
     """
     Calculate the feasibility reward for the Job Shop Scheduling Problem (JSSP).
-    
+
     For JSSP, the solution must satisfy:
     1. Each job must have all its operations scheduled
     2. Operations of a job must be processed in order
     3. Each machine can process only one job at a time
-    
+
     Returns a score between 0 and 1 based on how close the solution is to feasibility.
     """
     scores = []
-    
+
     for i, response in enumerate(completions):
         # Assign weights to different feasibility aspects
         weights = {
@@ -534,22 +534,22 @@ def feasibility_reward_func_jssp(completions, instance, **kwargs):
             "machine_validity": 0.2,  # No machine conflicts
             "precedence": 0.4,    # Operations of a job processed in order
         }
-        
+
         score = 0.0
         parsed_solution = parse_solution_jssp(response)
-        
+
         if parsed_solution is None:
             scores.append(0.0)
             continue
-            
+
         # Solution can be parsed
         score += weights["parse"]
-        
+
         schedule = parsed_solution["schedule"]
-        
+
         # Get the instance data for this example
         instance_arr = np.array(instance[i])
-        
+
         # Check job coverage: all jobs should appear exactly once in each machine's schedule
         try:
             n_jobs = int(instance_arr['n'])
@@ -558,90 +558,90 @@ def feasibility_reward_func_jssp(completions, instance, **kwargs):
             # For the case where instance is numpy array
             n_jobs = instance_arr.shape[0]
             n_machines = instance_arr.shape[1] // 2
-        
+
         # Check if the number of machines in the solution matches the instance
         if len(schedule) != n_machines:
             scores.append(score)  # Only get points for parsing
             continue
-        
+
         # Check if all jobs are scheduled on all machines
         all_jobs_scheduled = True
         for machine_schedule in schedule:
             if len(machine_schedule) != n_jobs or set(machine_schedule) != set(range(n_jobs)):
                 all_jobs_scheduled = False
                 break
-                
+
         if all_jobs_scheduled:
             score += weights["job_coverage"]
-        
+
         # Check machine validity - no overlapping operations on same machine
-        # This is inherently satisfied by the schedule format, as each machine 
+        # This is inherently satisfied by the schedule format, as each machine
         # processes jobs sequentially. We're primarily checking if the schedule format is valid.
         valid_machine_scheduling = all(len(machine_schedule) == n_jobs for machine_schedule in schedule)
-        
+
         if valid_machine_scheduling:
             score += weights["machine_validity"]
-            
+
         # Check precedence constraints using get_makespan function from utils
         try:
             # Get the real makespan which automatically checks precedence constraints
             real_makespan = get_makespan(instance_arr, schedule)
-            
+
             # If get_makespan returns a number (not "infeasible"), the schedule respects precedence constraints
             if real_makespan != "infeasible":
                 score += weights["precedence"]
         except Exception as e:
             # Error in get_makespan likely means precedence constraints are violated
             pass  # No additional points for precedence
-        
+
         scores.append(score)
-    
+
     return scores
 
 def optimality_reward_func_jssp(completions, ground_truth, instance, **kwargs):
     """
     Calculate the optimality reward for the Job Shop Scheduling Problem (JSSP).
-    
+
     The optimality is measured by the makespan compared to the optimal solution.
     For JSSP, shorter makespan is better.
     """
     scores = []
     feasibility_scores = feasibility_reward_func_jssp(completions, instance)
-    
+
     for i, (response, feasibility_score) in enumerate(zip(completions, feasibility_scores)):
         # If solution is not feasible, give no optimality reward
         if feasibility_score < 0.99:  # JSSP requires high feasibility to be meaningful
             scores.append(0.0)
             continue
-        
+
         parsed_solution = parse_solution_jssp(response)
         if parsed_solution is None:
             scores.append(0.0)
             continue
-            
+
         try:
             # Get the instance data for this example
             instance_arr = np.array(instance[i])
-            
+
             # Get the schedule from parsed solution
             schedule = parsed_solution["schedule"]
-            
+
             # Calculate the real makespan using the get_makespan function from utils
             real_makespan = get_makespan(instance_arr, schedule)
-            
+
             # Check if the schedule is feasible
             if real_makespan == "infeasible":
                 scores.append(0.0)
                 continue
-                
+
             # Parse the reference (optimal) makespan
             label_makespan_match = re.search(r"Makespan:\s*(\d+)", ground_truth[i])
             if not label_makespan_match:
                 scores.append(0.0)
                 continue
-                
+
             optimal_makespan = float(label_makespan_match.group(1))
-            
+
             # For JSSP, shorter makespan is better, so calculate inverse ratio
             if real_makespan < optimal_makespan:
                 # If prediction is better than ground truth (rare but possible), give full score
@@ -654,5 +654,5 @@ def optimality_reward_func_jssp(completions, ground_truth, instance, **kwargs):
         except Exception as e:
             # Error in calculating makespan
             scores.append(0.0)
-    
+
     return scores

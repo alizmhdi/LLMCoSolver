@@ -12,15 +12,15 @@ from multiprocessing.dummy import Pool as ThreadPool
 def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     """
     Decodes a machine-based job shop scheduling solution.
-    
+
     Parameters:
         instance (np.array): 2D array with shape (n, 2*m) where each row represents a job.
                              For each job the operations are represented as consecutive pairs:
                              (machine, processing_time). There are m operations per job.
         schedule (list of lists): A list of m lists, each being a permutation of job indices.
-                                        The k-th list gives the order in which machine k processes 
+                                        The k-th list gives the order in which machine k processes
                                         its designated operations.
-                                        
+
     Returns:
         The makespan (a numerical value) if a feasible schedule is constructed, or
         the string "infeasible" if the machine-based representation does not lead to a
@@ -28,7 +28,7 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     """
     n, two_m = instance.shape
     m = two_m // 2  # each job has m operations
-    
+
     # job_next[j] tracks the next operation index (0-indexed) to be scheduled for job j.
     job_next = [0] * n
     # job_finish[j] records the finish time of the last scheduled operation for job j.
@@ -37,14 +37,14 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     machine_finish = [0] * m
     # For each machine, machine_ptr[k] indicates how far we have advanced in its permutation.
     machine_ptr = [0] * m
-    
+
     scheduled_ops = 0
     total_ops = n * m
-    
+
     # Iterative scheduling: while there are operations not yet scheduled.
     while scheduled_ops < total_ops:
         available = []  # list to collect available operations as (start_time, machine, job)
-        
+
         # For each machine, if there is still an operation assigned in its permutation ...
         for machine in range(m):
             if machine_ptr[machine] < n:
@@ -55,18 +55,18 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
                     # The operation can start only after the job's previous operation and the machine are free.
                     start_time = max(job_finish[job], machine_finish[machine])
                     available.append((start_time, machine, job))
-        
+
         # If no machine has a ready operation, then the representation is infeasible.
         if not available:
             return "infeasible"
-        
+
         # Choose the operation with the earliest possible start time.
         available.sort(key=lambda x: x[0])
         start_time, machine, job = available[0]
         op_idx = job_next[job]
         proc_time = instance[job, 2 * op_idx + 1]
         finish_time = start_time + proc_time
-        
+
         # Update the finish times and pointers.
         job_finish[job] = finish_time
         machine_finish[machine] = finish_time
@@ -111,10 +111,10 @@ def calculate_pfsp_makespan(job_order, processing_times, m_machines):
 def extract_objectives(json_file_path):
     """
     Extract all objective values from a TSP JSON file.
-    
+
     Args:
         json_file_path: Path to the JSON file containing TSP data
-    
+
     Returns:
         List of extracted objective values
     """
@@ -127,15 +127,15 @@ def extract_objectives(json_file_path):
     except FileNotFoundError:
         print(f"Error: File {json_file_path} not found")
         return []
-    
+
     objectives = []
-    
+
     # Check if data is a list of objects or a single object
     if isinstance(data, list):
         items = data
     else:
         items = [data]
-    
+
     for item in items:
         if 'output' in item:
             # Extract the objective value using regex
@@ -148,7 +148,7 @@ def extract_objectives(json_file_path):
                     objectives.append(float(match.group(1)))
                 else:
                     print(f"Warning: Could not extract objective value from {item.get('num_nodes', 'unknown')}-node problem")
-    
+
     return objectives
 
 def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True):
@@ -181,7 +181,7 @@ def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True):
     assert len(failed) == 0, "Some instances failed: {}".format(" ".join(failed))
     return results, num_cpus
 
-    
+
 def check_extension(filename):
     if os.path.splitext(filename)[1] != ".pkl":
         return filename + ".pkl"
@@ -258,15 +258,15 @@ def extract_predicted_solution(text: str) -> str:
 def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     """
     Decodes a machine-based job shop scheduling solution.
-    
+
     Parameters:
         instance (np.array): 2D array with shape (n, 2*m) where each row represents a job.
                              For each job the operations are represented as consecutive pairs:
                              (machine, processing_time). There are m operations per job.
         schedule (list of lists): A list of m lists, each being a permutation of job indices.
-                                        The k-th list gives the order in which machine k processes 
+                                        The k-th list gives the order in which machine k processes
                                         its designated operations.
-                                        
+
     Returns:
         The makespan (a numerical value) if a feasible schedule is constructed, or
         the string "infeasible" if the machine-based representation does not lead to a
@@ -274,7 +274,7 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     """
     n, two_m = instance.shape
     m = two_m // 2  # each job has m operations
-    
+
     # job_next[j] tracks the next operation index (0-indexed) to be scheduled for job j.
     job_next = [0] * n
     # job_finish[j] records the finish time of the last scheduled operation for job j.
@@ -283,14 +283,14 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
     machine_finish = [0] * m
     # For each machine, machine_ptr[k] indicates how far we have advanced in its permutation.
     machine_ptr = [0] * m
-    
+
     scheduled_ops = 0
     total_ops = n * m
-    
+
     # Iterative scheduling: while there are operations not yet scheduled.
     while scheduled_ops < total_ops:
         available = []  # list to collect available operations as (start_time, machine, job)
-        
+
         # For each machine, if there is still an operation assigned in its permutation ...
         for machine in range(m):
             if machine_ptr[machine] < n:
@@ -301,18 +301,18 @@ def get_makespan(instance: np.array, schedule: list[list[int]]) -> float:
                     # The operation can start only after the job's previous operation and the machine are free.
                     start_time = max(job_finish[job], machine_finish[machine])
                     available.append((start_time, machine, job))
-        
+
         # If no machine has a ready operation, then the representation is infeasible.
         if not available:
             return "infeasible"
-        
+
         # Choose the operation with the earliest possible start time.
         available.sort(key=lambda x: x[0])
         start_time, machine, job = available[0]
         op_idx = job_next[job]
         proc_time = instance[job, 2 * op_idx + 1]
         finish_time = start_time + proc_time
-        
+
         # Update the finish times and pointers.
         job_finish[job] = finish_time
         machine_finish[machine] = finish_time
@@ -329,27 +329,27 @@ def calculate_pfsp_makespan(job_order, processing_times, m_machines):
     # Convert 1-indexed job order to 0-indexed
     zero_indexed_order = [job - 1 for job in job_order]
     n_jobs = len(zero_indexed_order)
-    
+
     # Initialize completion times
     completion_times = [[0 for _ in range(n_jobs)] for _ in range(m_machines)]
-    
+
     # Calculate completion time for first job on all machines
     first_job = zero_indexed_order[0]
     completion_times[0][0] = processing_times[0][first_job]
     for m in range(1, m_machines):
         completion_times[m][0] = completion_times[m-1][0] + processing_times[m][first_job]
-    
+
     # Calculate completion times for remaining jobs
     for j in range(1, n_jobs):
         current_job = zero_indexed_order[j]
-        
+
         # First machine
         completion_times[0][j] = completion_times[0][j-1] + processing_times[0][current_job]
-        
+
         # Remaining machines
         for m in range(1, m_machines):
             completion_times[m][j] = max(completion_times[m][j-1], completion_times[m-1][j]) + processing_times[m][current_job]
-    
+
     # Return the makespan (completion time of the last job on the last machine)
     return completion_times[m_machines-1][n_jobs-1]
 
@@ -375,7 +375,9 @@ def compute_metric_cop(predictions, labels, instances, problem):
 
         # Extract the solution part from the gold/label text
         label_solution = extract_predicted_solution(labels[i])
-        
+        print('label_solution: ', label_solution)
+        print('prediction_solution: ', prediction_solution)
+
 
         if problem == "tsp":
             # Parse route from the label
@@ -433,13 +435,13 @@ def compute_metric_cop(predictions, labels, instances, problem):
 
             tour_str = pred_match.group(1)
             tour_list = list(map(int, tour_str.split(", ")))
-            
+
             try:
                 total_distance = calculate_total_distance(tour_list, compute_euclidean_distance_matrix(instances[i][0]))
             except:
                 infeasibility += 1
                 continue
-            
+
             # Check if tour starts from depot
             if tour_list[0] != 0:
                 infeasibility += 1
@@ -499,12 +501,12 @@ def compute_metric_cop(predictions, labels, instances, problem):
             if not all(isinstance(r, list) for r in predicted_routes):
                 infeasibility += 1
                 continue
-            
+
 
             # 1) Capacity check & route start/end check
             any_route_infeasible = False
             distance_matrix = compute_euclidean_distance_matrix(locs)
-            
+
             try:
                 for route in predicted_routes:
                     # Must start/end at depot 0
@@ -538,7 +540,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             if visited_customers != required_customers:
                 infeasibility += 1
                 continue
-            
+
             # 3) Parse reference objective
             label_obj_match = re.search(r"Objective:\s*([\d.]+)", label_solution)
             if not label_obj_match:
@@ -568,7 +570,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
                 if not pred_match:
                     infeasibility += 1
                     continue
-            
+
 
             cover_str = pred_match.group(1).strip()
             # Attempt to parse the string as a list of ints
@@ -609,7 +611,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             gaps.append(gap)
             predicted_objectives.append(pred_cover_size)
             optimal_objectives.append(optimal_cover_size)
-            
+
         elif problem == "mis":
             # 1) Parse predicted independent set from "Set: [ ... ]"
             pred_match = re.search(r"\s*\[([^\]]+)\]", prediction_solution)
@@ -628,19 +630,19 @@ def compute_metric_cop(predictions, labels, instances, problem):
                 # Could not parse the set properly
                 infeasibility += 1
                 continue
-            
+
             # 2) Check feasibility: no two vertices in the set should be adjacent
             # instance structure is expected to be (num_nodes, edges, ...)
             edges_mis = instances[i][1]  # edges is the second element
             indset = set(predicted_indset)
-            
+
             # Check if any pair of vertices in the independent set are adjacent
             is_independent = True
             for (u, v) in edges_mis:
                 if u in indset and v in indset:
                     is_independent = False
                     break
-                    
+
             if not is_independent:
                 print("not independent")
                 infeasibility += 1
@@ -681,11 +683,11 @@ def compute_metric_cop(predictions, labels, instances, problem):
             # Extract instance data
             n_jobs = instances[i].shape[0]
             m_machines = instances[i].shape[1]
-            
+
             # Parse processing times
             processing_times = instances[i].T
-            
-            
+
+
             # Check if the job order contains all jobs exactly once
             expected_jobs = set(range(1, n_jobs + 1))  # Jobs are 1-indexed
             if set(job_order) != expected_jobs or len(job_order) != n_jobs:
@@ -698,16 +700,16 @@ def compute_metric_cop(predictions, labels, instances, problem):
                 infeasibility += 1
                 continue
             optimal_makespan = float(label_obj_match.group(1))
-            
+
             # Calculate the makespan for the predicted job order
             predicted_makespan = calculate_pfsp_makespan(job_order, processing_times, m_machines)
-            
+
             # Calculate optimality gap
             gap = (predicted_makespan - optimal_makespan) / optimal_makespan
             gaps.append(gap)
             predicted_objectives.append(predicted_makespan)
             optimal_objectives.append(optimal_makespan)
-            
+
         elif problem == "jssp":
             # Parse predicted schedule from the text
             schedule_match = re.search(r"Schedule:\s*(\[\[.*?\]\])", prediction_solution, re.DOTALL)
@@ -715,57 +717,57 @@ def compute_metric_cop(predictions, labels, instances, problem):
                 # No schedule found
                 infeasibility += 1
                 continue
-                
+
             try:
                 # Parse the schedule
                 schedule_str = schedule_match.group(1).strip()
                 schedule = ast.literal_eval(schedule_str)
-                
+
                 # Get instance data
                 instance = instances[i]
-                
+
                 # Basic validation: Check if the prediction has the right structure
                 n_jobs = instance.shape[0]
                 n_machines = instance.shape[1] // 2
-                
+
                 # Check if the number of machines in the schedule matches the instance
                 if len(schedule) != n_machines:
                     infeasibility += 1
                     continue
-                
+
                 # Check if each machine processes each job exactly once
                 valid_structure = True
                 for machine_schedule in schedule:
                     if len(machine_schedule) != n_jobs or set(machine_schedule) != set(range(n_jobs)):
                         valid_structure = False
                         break
-                
+
                 if not valid_structure:
                     infeasibility += 1
                     continue
-                
+
                 # Use the provided get_makespan function to calculate the makespan and check feasibility
                 predicted_makespan = get_makespan(instance, schedule)
-                
+
                 # If the schedule is infeasible, mark it and continue
                 if predicted_makespan == "infeasible":
                     infeasibility += 1
                     continue
-                
+
                 # Parse the objective from the gold solution
                 label_obj_match = re.search(r"Makespan: (\d+)", label_solution)
                 if not label_obj_match:
                     infeasibility += 1
                     continue
-                
+
                 optimal_makespan = float(label_obj_match.group(1))
-                
+
                 # Calculate optimality gap
                 gap = (predicted_makespan - optimal_makespan) / optimal_makespan
                 gaps.append(gap)
                 predicted_objectives.append(predicted_makespan)
                 optimal_objectives.append(optimal_makespan)
-                
+
             except Exception as e:
                 # Error in parsing or evaluating the schedule
                 infeasibility += 1
@@ -777,12 +779,12 @@ def compute_metric_cop(predictions, labels, instances, problem):
     # Calculate gap percentiles statistics
     # set negative gaps to 0
     gaps = [max(0.0, g) for g in gaps]
-    
+
     if len(gaps) > 0:
         below_1pct = sum(1 for g in gaps if g < 0.01)
         below_5pct = sum(1 for g in gaps if g < 0.05)
         below_10pct = sum(1 for g in gaps if g < 0.10)
-        
+
         print("\nGap distribution:")
         print("Below 1%: {} instances ({:.1f}%)".format(
             below_1pct, below_1pct/len(gaps)*100))
@@ -790,7 +792,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
             below_5pct, below_5pct/len(gaps)*100))
         print("Below 10%: {} instances ({:.1f}%)".format(
             below_10pct, below_10pct/len(gaps)*100))
-        
+
         # Print average objective values
         if predicted_objectives and optimal_objectives:
             avg_predicted = sum(predicted_objectives) / len(predicted_objectives)
@@ -806,7 +808,7 @@ def compute_metric_cop(predictions, labels, instances, problem):
         mean_gap = float('inf')  # or some fallback
     else:
         mean_gap = sum(gaps) / len(gaps)
-        
+
     std_gap = np.std(gaps) if len(gaps) > 1 else 0.0
 
     return feasibility_rate, mean_gap, std_gap
@@ -839,14 +841,14 @@ def transform_data_cvrp(d):
     d["instance_demands"] = inst_1d     # 1D list of demands
     d["instance_capacity"] = inst_float   # float vehicle capacity
     del d["instance"]
-    
+
     return d
 
 
 def load_single_dict_dataset(json_path, problem, num_samples=None):
     """
     Load and transform dataset from JSON file.
-    
+
     Args:
         json_path (str): Path to the JSON file
         problem (str): Problem type ('op', 'tsp', 'mvc', or 'cvrp')
@@ -854,7 +856,7 @@ def load_single_dict_dataset(json_path, problem, num_samples=None):
     """
     import json
     from datasets import Dataset
-    
+
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -862,11 +864,11 @@ def load_single_dict_dataset(json_path, problem, num_samples=None):
     # If it's already a list -> we can process each dict in that list.
     if isinstance(data, dict):
         data = [data]
-    
+
     # Limit samples if specified
     if num_samples is not None:
         data = data[:num_samples]
-    
+
     # Transform data based on problem type
     if problem == 'op':
         transformed_data = [transform_data_op(d) for d in data]
@@ -882,14 +884,14 @@ def load_single_dict_dataset(json_path, problem, num_samples=None):
 def load_train_dict_dataset(json_path, problem):
     """
     Load and transform training dataset from JSON file.
-    
+
     Args:
         json_path (str): Path to the JSON file
         problem (str): Problem type ('op', 'tsp', 'mvc', or 'cvrp')
     """
     import json
     from datasets import Dataset
-    
+
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     # If the top-level JSON is a single dict -> wrap in list of length 1
@@ -915,21 +917,101 @@ def load_train_dict_dataset(json_path, problem):
     return Dataset.from_list(data)
 
 
-def get_dataset(problem, tokenizer=None, num_samples=None, train=True):
+def resolve_node_bounds(num_nodes=None, min_nodes=None, max_nodes=None):
+    """Resolve inclusive node-count bounds for dataset filtering."""
+    if min_nodes is not None or max_nodes is not None:
+        return min_nodes, max_nodes
+    if num_nodes is not None:
+        return num_nodes, num_nodes
+    return None, None
+
+
+def node_filter_active(num_nodes=None, min_nodes=None, max_nodes=None):
+    lo, hi = resolve_node_bounds(num_nodes, min_nodes, max_nodes)
+    return lo is not None or hi is not None
+
+
+def describe_node_filter(num_nodes=None, min_nodes=None, max_nodes=None):
+    lo, hi = resolve_node_bounds(num_nodes, min_nodes, max_nodes)
+    if lo is None and hi is None:
+        return None
+    if lo is not None and hi is not None and lo == hi:
+        return f"num_nodes={lo}"
+    parts = []
+    if lo is not None:
+        parts.append(f"min_nodes={lo}")
+    if hi is not None:
+        parts.append(f"max_nodes={hi}")
+    return ", ".join(parts)
+
+
+def filter_dataset_by_nodes(dataset, num_nodes=None, min_nodes=None, max_nodes=None):
+    """Keep only rows whose num_nodes falls within the resolved bounds."""
+    if "num_nodes" not in dataset.column_names:
+        return dataset
+
+    lo, hi = resolve_node_bounds(num_nodes, min_nodes, max_nodes)
+    if lo is None and hi is None:
+        return dataset
+
+    def _keep(example):
+        n = int(example["num_nodes"])
+        if lo is not None and n < lo:
+            return False
+        if hi is not None and n > hi:
+            return False
+        return True
+
+    filtered = dataset.filter(_keep)
+    print(f">> Filtered to {describe_node_filter(num_nodes, min_nodes, max_nodes)}: {len(filtered)} examples")
+    return filtered
+
+
+def add_node_filter_args(parser):
+    parser.add_argument(
+        '--num_nodes', type=int, default=None,
+        help='Keep only instances with exactly this many nodes (shorthand for min=max)',
+    )
+    parser.add_argument(
+        '--min_nodes', type=int, default=None,
+        help='Keep instances with at least this many nodes',
+    )
+    parser.add_argument(
+        '--max_nodes', type=int, default=None,
+        help='Keep instances with at most this many nodes',
+    )
+
+
+def get_dataset(
+    problem,
+    tokenizer=None,
+    num_samples=None,
+    train=True,
+    num_nodes=None,
+    min_nodes=None,
+    max_nodes=None,
+    max_train_samples=None,
+    max_eval_samples=None,
+):
     """
     Get formatted dataset for RL training.
-    
+
     Args:
         problem (str): Problem type ('op', 'tsp', 'mvc', or 'cvrp')
         tokenizer: Tokenizer for formatting prompts
         num_samples (int, optional): Number of samples to load
         train (bool): Whether to load training dataset
-    
+        num_nodes (int, optional): Keep only instances with exactly this many nodes
+        min_nodes (int, optional): Keep instances with at least this many nodes
+        max_nodes (int, optional): Keep instances with at most this many nodes
+        max_train_samples (int, optional): Cap training examples after filtering
+        max_eval_samples (int, optional): Cap eval examples after filtering
+
     Returns:
         tuple: (train_dataset, eval_dataset)
     """
     # Alpaca-style prompt template
-    alpaca_prompt = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance. 
+    alpaca_prompt = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance.
     Your task is to produce a feasible solution that optimizes (minimizes or maximizes) the given objective. You can reason about how to achieve that in the <reasoning></reasoning> section.
 
     ### Instruction:{}
@@ -954,29 +1036,68 @@ def get_dataset(problem, tokenizer=None, num_samples=None, train=True):
             "ground_truth": completions,
             # You could also copy instance_coords, instance_prizes, etc.
         }
-    
+
+    def _filter_by_num_nodes(dataset):
+        return filter_dataset_by_nodes(
+            dataset, num_nodes=num_nodes, min_nodes=min_nodes, max_nodes=max_nodes
+        )
+
+    def _apply_sample_limits(train_ds, eval_ds):
+        if max_train_samples is not None and len(train_ds) > max_train_samples:
+            train_ds = train_ds.select(range(max_train_samples))
+        if max_eval_samples is not None and len(eval_ds) > max_eval_samples:
+            eval_ds = eval_ds.select(range(max_eval_samples))
+        elif num_samples is not None and len(eval_ds) > num_samples:
+            eval_ds = eval_ds.select(range(num_samples))
+        return train_ds, eval_ds
+
     if not train:
         eval_json_path = f"./data_rl/{problem}/eval/test.json"
         # eval_json_path = f'./data_compare_with_heu/{problem}/test_small.json'
         # eval_json_path = f'./data_compare_lncs/{problem}/data.json'
-        eval_dataset = load_single_dict_dataset(eval_json_path, problem, num_samples=num_samples)
+        eval_dataset = load_single_dict_dataset(eval_json_path, problem, num_samples=None)
+        eval_dataset = _filter_by_num_nodes(eval_dataset)
+        eval_dataset, _ = _apply_sample_limits(eval_dataset, eval_dataset)
         eval_dataset = eval_dataset.map(formatting_prompts_func, batched=True)
-        
-        # Limit number of samples if specified
-        if num_samples is not None:
-            eval_dataset = eval_dataset.select(range(num_samples))
-            
+
+        if len(eval_dataset) == 0:
+            print("Warning: eval dataset is empty after filtering; disabling built-in eval.")
+            eval_dataset = None
+        else:
+            print(f"Using eval={len(eval_dataset)}")
+
         return None, eval_dataset
     else:
         train_json_path = f"./data_rl/{problem}/train/train_rl.json"
         eval_json_path = f"./data_rl/{problem}/eval/test.json"
 
-        # Create a dataset from flattened JSON
         train_dataset = load_train_dict_dataset(train_json_path, problem)
-        eval_dataset = load_single_dict_dataset(eval_json_path, problem, num_samples=num_samples)
+        eval_dataset = load_single_dict_dataset(eval_json_path, problem, num_samples=None)
 
-        # Now map your formatting function
+        train_dataset = _filter_by_num_nodes(train_dataset)
+        eval_dataset = _filter_by_num_nodes(eval_dataset)
+        if node_filter_active(num_nodes, min_nodes, max_nodes):
+            print(
+                f"Filtered to {describe_node_filter(num_nodes, min_nodes, max_nodes)}: "
+                f"train={len(train_dataset)}, eval={len(eval_dataset)}"
+            )
+
+        train_dataset, eval_dataset = _apply_sample_limits(train_dataset, eval_dataset)
         train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
         eval_dataset = eval_dataset.map(formatting_prompts_func, batched=True)
 
+        if len(train_dataset) == 0:
+            raise ValueError(
+                f"No RL training examples found for problem={problem}"
+                + (
+                    f", {describe_node_filter(num_nodes, min_nodes, max_nodes)}"
+                    if node_filter_active(num_nodes, min_nodes, max_nodes) else ""
+                )
+                + ". Check data_rl or try different node filters."
+            )
+        if len(eval_dataset) == 0:
+            print("Warning: eval dataset is empty after filtering; disabling built-in eval.")
+            eval_dataset = None
+
+        print(f"Using train={len(train_dataset)}, eval={0 if eval_dataset is None else len(eval_dataset)}")
         return train_dataset, eval_dataset

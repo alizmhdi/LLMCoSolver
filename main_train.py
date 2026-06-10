@@ -7,11 +7,19 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from transformers import TrainingArguments, TrainerCallback, DataCollatorForLanguageModeling
 from transformers.trainer_utils import get_last_checkpoint
 import re
-from utils import *
 import os
 import ast
 #os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
-from utils import calculate_total_distance, compute_euclidean_distance_matrix, calculate_pfsp_makespan
+from utils import (
+    add_node_filter_args,
+    calculate_pfsp_makespan,
+    calculate_total_distance,
+    compute_euclidean_distance_matrix,
+    describe_node_filter,
+    extract_predicted_solution,
+    filter_dataset_by_nodes,
+    node_filter_active,
+)
 import warnings
 import numpy as np
 
@@ -119,8 +127,7 @@ def parse_args() -> argparse.Namespace:
     # Output and evaluation
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory name')
     parser.add_argument('--eval_steps', type=int, default=1000, help='Steps interval to evaluate the model')
-    parser.add_argument('--num_nodes', type=int, default=None,
-                        help='Keep only instances with this many cities/nodes (e.g. 10)')
+    add_node_filter_args(parser)
     parser.add_argument('--max_train_samples', type=int, default=None,
                         help='Cap the number of training examples after filtering')
     parser.add_argument('--max_eval_samples', type=int, default=None,
@@ -131,7 +138,15 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def get_dataset(tokenizer, problem, num_nodes=None, max_train_samples=None, max_eval_samples=None):
+def get_dataset(
+    tokenizer,
+    problem,
+    num_nodes=None,
+    min_nodes=None,
+    max_nodes=None,
+    max_train_samples=None,
+    max_eval_samples=None,
+):
     # Define the Alpaca-style prompt template
     alpaca_prompt = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance.
     Your task is to produce a feasible solution that optimizes (minimizes or maximizes) the given objective.
@@ -162,10 +177,17 @@ def get_dataset(tokenizer, problem, num_nodes=None, max_train_samples=None, max_
     train_dataset = load_dataset('./data/' + problem + '/train', split="train", cache_dir="../datasets").shuffle(seed=42)
     eval_dataset = load_dataset('./data/' + problem + '/eval', split="test", cache_dir="../datasets")
 
-    if num_nodes is not None:
-        train_dataset = train_dataset.filter(lambda x: int(x["num_nodes"]) == num_nodes)
-        eval_dataset = eval_dataset.filter(lambda x: int(x["num_nodes"]) == num_nodes)
-        print(f"Filtered to num_nodes={num_nodes}: train={len(train_dataset)}, eval={len(eval_dataset)}")
+    if node_filter_active(num_nodes, min_nodes, max_nodes):
+        train_dataset = filter_dataset_by_nodes(
+            train_dataset, num_nodes=num_nodes, min_nodes=min_nodes, max_nodes=max_nodes
+        )
+        eval_dataset = filter_dataset_by_nodes(
+            eval_dataset, num_nodes=num_nodes, min_nodes=min_nodes, max_nodes=max_nodes
+        )
+        print(
+            f"Using {describe_node_filter(num_nodes, min_nodes, max_nodes)}: "
+            f"train={len(train_dataset)}, eval={len(eval_dataset)}"
+        )
 
     if max_train_samples is not None and len(train_dataset) > max_train_samples:
         train_dataset = train_dataset.select(range(max_train_samples))
@@ -178,6 +200,18 @@ def get_dataset(tokenizer, problem, num_nodes=None, max_train_samples=None, max_
     # instances = load_pkl_dataset('./data/' + problem + '/instances.pkl')
     instances = None
     print(f"Using train={len(train_dataset)}, eval={len(eval_dataset)}")
+    if len(train_dataset) == 0:
+        raise ValueError(
+            f"No training examples found for problem={problem}"
+            + (
+                f", {describe_node_filter(num_nodes, min_nodes, max_nodes)}"
+                if node_filter_active(num_nodes, min_nodes, max_nodes) else ""
+            )
+            + ". Check data/tsp/train or try different node filters."
+        )
+    if len(eval_dataset) == 0:
+        print("Warning: eval dataset is empty after filtering; disabling built-in eval.")
+        eval_dataset = None
     print(train_dataset[0])
 
     return train_dataset, eval_dataset, instances
@@ -664,6 +698,8 @@ def train_model(args):
     train_dataset, eval_dataset, instances = get_dataset(
         tokenizer, problem,
         num_nodes=args.num_nodes,
+        min_nodes=args.min_nodes,
+        max_nodes=args.max_nodes,
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
     )

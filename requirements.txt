@@ -75,7 +75,7 @@ multiprocess==0.70.16
 networkx==3.5
 ninja==1.11.1.4
 numba==0.61.2
-numpy==2.3.2
+numpy==2.2.6
 nvidia-cublas-cu12==12.6.4.1
 nvidia-cuda-cupti-cu12==12.6.80
 nvidia-cuda-nvrtc-cu12==12.6.77

@@ -3,8 +3,14 @@ import argparse
 import torch
 import numpy as np
 from transformers import AutoTokenizer, pipeline, AutoModelForCausalLM
-from utils import load_pkl_dataset
-from utils import compute_metric_cop
+from utils import (
+    load_pkl_dataset,
+    compute_metric_cop,
+    filter_dataset_by_nodes,
+    node_filter_active,
+    describe_node_filter,
+    add_node_filter_args,
+)
 from tqdm import tqdm
 from rl_train import get_dataset
 from Envs.eval_utils import (
@@ -34,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     # Parameters for both methods
     parser.add_argument('--num_samples', type=int, default=100, 
                         help='Number of samples to evaluate (default: 100)')
+    add_node_filter_args(parser)
     
     # Parameters specific to Best-of-N evaluation
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for evaluation (best_of_n only)')
@@ -71,7 +78,15 @@ def load_model_and_tokenizer(model_id):
     return model, tokenizer, pipe
 
 
-def load_datasets(problem, tokenizer, dataset_method='auto', eval_method='vanilla'):
+def load_datasets(
+    problem,
+    tokenizer,
+    dataset_method='auto',
+    eval_method='vanilla',
+    num_nodes=None,
+    min_nodes=None,
+    max_nodes=None,
+):
     """
     Load the evaluation datasets using the specified method.
     
@@ -80,6 +95,9 @@ def load_datasets(problem, tokenizer, dataset_method='auto', eval_method='vanill
         tokenizer: The tokenizer for the model
         dataset_method (str): Method to load dataset ('auto', 'load_dataset', or 'get_dataset')
         eval_method (str): Evaluation method ('vanilla' or 'best_of_n')
+        num_nodes (int, optional): Keep only instances with exactly this many nodes
+        min_nodes (int, optional): Keep instances with at least this many nodes
+        max_nodes (int, optional): Keep instances with at most this many nodes
         
     Returns:
         tuple: (eval_dataset, number_dataset)
@@ -92,12 +110,35 @@ def load_datasets(problem, tokenizer, dataset_method='auto', eval_method='vanill
     if dataset_method == 'load_dataset':
         # Method used in main_eval.py
         eval_dataset = load_dataset(f'./data/{problem}/eval', split="test")
+        eval_dataset = filter_dataset_by_nodes(
+            eval_dataset, num_nodes=num_nodes, min_nodes=min_nodes, max_nodes=max_nodes
+        )
     else:  # get_dataset
         # Method used in BestofNEval.py
-        _, eval_dataset = get_dataset(problem, tokenizer, num_samples=None, train=False)
+        _, eval_dataset = get_dataset(
+            problem,
+            tokenizer,
+            num_samples=None,
+            train=False,
+            num_nodes=num_nodes,
+            min_nodes=min_nodes,
+            max_nodes=max_nodes,
+        )
     
-    # Load number dataset (common to both methods)
-    number_dataset = load_pkl_dataset(f'./data/{problem}/instances.pkl')
+    if len(eval_dataset) == 0:
+        raise ValueError(
+            f"No eval examples found for problem={problem}"
+            + (
+                f" with {describe_node_filter(num_nodes, min_nodes, max_nodes)}"
+                if node_filter_active(num_nodes, min_nodes, max_nodes) else ""
+            )
+        )
+    
+    # Use per-row instances when filtering so metrics align with eval indices
+    if node_filter_active(num_nodes, min_nodes, max_nodes) and "instance" in eval_dataset.column_names:
+        number_dataset = list(eval_dataset["instance"])
+    else:
+        number_dataset = load_pkl_dataset(f'./data/{problem}/instances.pkl')
     
     return eval_dataset, number_dataset
 
@@ -389,8 +430,17 @@ def evaluate_model(args):
     
     # Load datasets
     eval_dataset, number_dataset = load_datasets(
-        args.problem, tokenizer, args.dataset_method, args.eval_method
+        args.problem,
+        tokenizer,
+        args.dataset_method,
+        args.eval_method,
+        args.num_nodes,
+        args.min_nodes,
+        args.max_nodes,
     )
+    if args.num_samples > len(eval_dataset):
+        print(f">> Capping num_samples from {args.num_samples} to {len(eval_dataset)}")
+        args.num_samples = len(eval_dataset)
     
     # Evaluate using the specified method
     if args.eval_method == 'vanilla':
@@ -406,6 +456,9 @@ def main():
     print(f"Running {args.eval_method} evaluation on {args.problem} problem...")
     print(f"Model: {args.model_id}")
     print(f"Number of samples: {args.num_samples}")
+    node_filter = describe_node_filter(args.num_nodes, args.min_nodes, args.max_nodes)
+    if node_filter is not None:
+        print(f"Node filter: {node_filter}")
     
     if args.eval_method == 'best_of_n':
         print(f"Best-of-N: {args.best_of_n}")

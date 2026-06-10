@@ -229,12 +229,11 @@ def build_tsp_prompt_fields(instance, k_nn=2):
         neighbor_str = [f"{n[0]}: {n[1]:.1f}" for n in nns[i]]
         node_desc = (
             f"Node {i}, coordinates: {coord_at(i)}, "
-            f"neighbors: {neighbor_str};"
+            f"neighbors (node_index: distance): [{', '.join(neighbor_str)}]"
         ).replace("\'", "")
         nodes_description.append(node_desc)
 
-    input_text = "".join(nodes_description)
-    input_text = ".".join(input_text.rsplit(";", 1))
+    input_text = ";".join(nodes_description) + "."
 
     return {
         "num_nodes": str(p_size),
@@ -504,7 +503,23 @@ class TSPEnv:
             json.dump(tsp_data, f, indent=4)
         print(f">> Saved transformed data to {output_file}")
 
-    def generate_instances_and_save(self, n_instance: int, file_name: str, save_pkl: bool, rl_data: bool = False) -> None:
+    def instances_to_json(self, instances: list[torch.Tensor], rl_data: bool = False) -> list[dict]:
+        tsp_data = []
+        for instance in tqdm(instances, desc="Generating TSP instances"):
+            json_data = tag_prompt_and_transform_to_json(instance)
+            if rl_data:
+                json_data["instance"] = instance.tolist()
+            tsp_data.append(json_data)
+        return tsp_data
+
+    def generate_instances_and_save(
+        self,
+        n_instance: int,
+        file_name: str,
+        save_pkl: bool,
+        rl_data: bool = False,
+        write_file: bool = True,
+    ) -> list[dict]:
         """
         Generate TSP instances and save them to a JSON file.
 
@@ -518,50 +533,163 @@ class TSPEnv:
             Whether to save the dataset as a pickle file.
         rl_data : bool
             Whether to generate data for Reinforcement Learning (RL) tasks.
+        write_file : bool
+            Whether to write the JSON output to ``file_name``.
         """
         instances = self.generate_tensor_instances(n_instance)
         if save_pkl:
             self.save_dataset(instances, "./ttt1000.pkl")
-        tsp_data = []
-        for instance in tqdm(instances, desc="Generating TSP instances"):
-            json_data = tag_prompt_and_transform_to_json(instance)
-            tsp_data.append(json_data)
-            if rl_data:
-                json_data["instance"] = instance.tolist()
-        # print average objective value
+        tsp_data = self.instances_to_json(instances, rl_data=rl_data)
         avg_objective = np.mean([float(data['output'].split('Objective: ')[1]) for data in tsp_data])
         print(f"Average objective value: {avg_objective:.2f}")
 
-        with open(file_name, 'w') as f:
-            json.dump(tsp_data, f, indent=4)
+        if write_file:
+            with open(file_name, 'w') as f:
+                json.dump(tsp_data, f, indent=4)
+        return tsp_data
+
+    def generate_per_distribution_and_save(
+        self,
+        n_instance_per_distribution: int,
+        file_name: str,
+        save_pkl: bool = False,
+        rl_data: bool = False,
+        append_to: str | None = None,
+        replace_num_nodes: int | None = None,
+    ) -> list[dict]:
+        """Generate a fixed number of instances for each sampler distribution."""
+        tsp_data: list[dict] = []
+        for dist_idx, distribution in enumerate(self.distributions):
+            env = TSPEnv(
+                n_node_range=self.n_node_range,
+                distributions=[distribution],
+                seed=None if self.seed is None else self.seed + dist_idx,
+                n_c=self.n_c,
+                std_cluster=self.std_cluster,
+            )
+            print(f"Sampler: {distribution}")
+            instances = env.generate_tensor_instances(n_instance_per_distribution)
+            if save_pkl and dist_idx == 0:
+                env.save_dataset(instances, "./instances.pkl")
+            tsp_data.extend(env.instances_to_json(instances, rl_data=rl_data))
+
+        if append_to is not None:
+            self._append_json_records(
+                tsp_data,
+                append_to,
+                replace_num_nodes=replace_num_nodes,
+            )
+            print(f">> Appended {len(tsp_data)} records to {append_to}")
+        else:
+            with open(file_name, 'w') as f:
+                json.dump(tsp_data, f, indent=4)
+            print(f">> Saved {len(tsp_data)} records to {file_name}")
+        return tsp_data
+
+    @staticmethod
+    def _append_json_records(
+        records: list[dict],
+        target_file: str,
+        replace_num_nodes: int | None = None,
+    ) -> None:
+        filedir = os.path.split(target_file)[0]
+        if filedir and not os.path.isdir(filedir):
+            os.makedirs(filedir)
+
+        existing: list[dict] = []
+        if os.path.exists(target_file):
+            with open(target_file) as f:
+                existing = json.load(f)
+
+        if replace_num_nodes is not None:
+            keep = [
+                row for row in existing
+                if str(row.get("num_nodes")) != str(replace_num_nodes)
+            ]
+            removed = len(existing) - len(keep)
+            existing = keep
+            print(f">> Removed {removed} existing records with num_nodes={replace_num_nodes}")
+
+        merged = existing + records
+        with open(target_file, 'w') as f:
+            json.dump(merged, f, indent=4)
+
+
+def parse_args():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate TSP SFT/RL datasets with TSPEnv samplers.")
+    parser.add_argument('--min_nodes', type=int, default=10, help='Minimum number of cities')
+    parser.add_argument('--max_nodes', type=int, default=10, help='Maximum number of cities')
+    parser.add_argument('--n_instances', type=int, help='Total number of TSP instances to generate')
+    parser.add_argument(
+        '--n_instances_per_distribution',
+        type=int,
+        help='Generate this many instances for each sampler distribution',
+    )
+    parser.add_argument(
+        '--distributions',
+        nargs='+',
+        default=['uniform', 'gaussian_mixture_2_5', 'gaussian_mixture_3_10', 'clustered', 'mixed'],
+        help='Coordinate samplers to use',
+    )
+    parser.add_argument('--output_file', type=str, default='./data/tsp/eval/val_nodes10.json')
+    parser.add_argument('--append_to', type=str, default=None, help='Append generated records to an existing JSON file')
+    parser.add_argument(
+        '--replace_num_nodes',
+        type=int,
+        default=None,
+        help='Drop existing records with this num_nodes before appending',
+    )
+    parser.add_argument('--save_pkl', action='store_true', default=False)
+    parser.add_argument('--rl_data', action='store_true', default=False, help='Include raw instance coordinates')
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--n_c', type=int, default=3, help='Number of cluster centers')
+    parser.add_argument('--std_cluster', type=float, default=0.07, help='Cluster spread for clustered/mixed samplers')
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    # Example usage with all distribution types
-    # tsp_env = TSPEnv(
-    #     n_node_range=[70, 100],
-    #     distributions=['uniform', 'gaussian_mixture_2_5', 'gaussian_mixture_3_10', 'clustered', 'mixed'],
-    #     seed=70,
-    #     n_c=3,  # Number of cluster centers
-    #     std_cluster=0.07  # Standard deviation for clusters
-    # )
-    
-    # Example with clustered and mixed distributions
+    args = parse_args()
+    if args.n_instances is None and args.n_instances_per_distribution is None:
+        raise SystemExit("Provide --n_instances or --n_instances_per_distribution")
+
     tsp_env = TSPEnv(
-        n_node_range=[1000, 1000],
-        distributions=['uniform', 'gaussian_mixture_2_5', 'gaussian_mixture_3_10'],
-        seed=42,
-        n_c=7,  # Number of cluster centers for clustered/mixed distributions
-        std_cluster=0.1  # Standard deviation for cluster spread
-    )
-    tsp_env.generate_instances_and_save(
-        n_instance=16,
-        file_name='./ttt1000.json',
-        save_pkl=True,
-        rl_data=True
+        n_node_range=[args.min_nodes, args.max_nodes],
+        distributions=args.distributions,
+        seed=args.seed,
+        n_c=args.n_c,
+        std_cluster=args.std_cluster,
     )
 
-    # from utils import concat_json_files
-    # concat_json_files('train_1000_3.json', 'train_1000_m.json', 'train_1000.json')
+    if args.n_instances_per_distribution is not None:
+        tsp_env.generate_per_distribution_and_save(
+            n_instance_per_distribution=args.n_instances_per_distribution,
+            file_name=args.output_file,
+            save_pkl=args.save_pkl,
+            rl_data=args.rl_data,
+            append_to=args.append_to,
+            replace_num_nodes=args.replace_num_nodes,
+        )
+    else:
+        tsp_data = tsp_env.generate_instances_and_save(
+            n_instance=args.n_instances,
+            file_name=args.output_file,
+            save_pkl=args.save_pkl,
+            rl_data=args.rl_data,
+        )
+        if args.append_to is not None:
+            TSPEnv._append_json_records(
+                tsp_data,
+                args.append_to,
+                replace_num_nodes=args.replace_num_nodes,
+            )
+            print(f">> Appended {len(tsp_data)} records to {args.append_to}")
 
-    # tsp1000: or-tools - 10.75
+    # Example:
+    # python Envs/TSPEnv/TSPEnv.py \
+    #   --min_nodes 10 --max_nodes 10 \
+    #   --n_instances_per_distribution 10 \
+    #   --rl_data \
+    #   --append_to ./data/tsp/eval/test.json \
+    #   --replace_num_nodes 10
