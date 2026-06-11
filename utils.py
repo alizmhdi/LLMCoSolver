@@ -665,6 +665,46 @@ def compute_metric_cop(predictions, labels, instances, problem):
             predicted_objectives.append(pred_indset_size)
             optimal_objectives.append(optimal_indset_size)
 
+        elif problem == "cs":
+            pred_match = re.search(r"Schedule:\s*\[([^\]]+)\]", prediction_solution)
+            if not pred_match:
+                infeasibility += 1
+                continue
+
+            schedule_str = pred_match.group(1).strip()
+            try:
+                schedule = [int(x.strip()) for x in schedule_str.split(",") if x.strip() != ""]
+            except ValueError:
+                infeasibility += 1
+                continue
+
+            throughputs, gpu_counts, num_gpus = instances[i][0], instances[i][1], float(instances[i][2])
+            num_jobs = len(throughputs)
+
+            if not all(0 <= j < num_jobs for j in schedule):
+                infeasibility += 1
+                continue
+            if len(schedule) != len(set(schedule)):
+                infeasibility += 1
+                continue
+
+            total_gpus = sum(float(gpu_counts[j]) for j in schedule)
+            if total_gpus > num_gpus + 1e-9:
+                infeasibility += 1
+                continue
+
+            label_obj_match = re.search(r"Objective:\s*([\d.]+)", label_solution)
+            if not label_obj_match:
+                infeasibility += 1
+                continue
+
+            opt_throughput = float(label_obj_match.group(1))
+            pred_throughput = sum(float(throughputs[j]) for j in schedule)
+            gap = (opt_throughput - pred_throughput) / (opt_throughput if opt_throughput != 0 else 1e-9)
+            gaps.append(max(0.0, gap))
+            predicted_objectives.append(pred_throughput)
+            optimal_objectives.append(opt_throughput)
+
         elif problem == "pfsp":
             # Parse the predicted job order
             pred_match = re.search(r"Order:\s*\[([^\]]+)\]", prediction_solution)
@@ -845,6 +885,16 @@ def transform_data_cvrp(d):
     return d
 
 
+def transform_data_cs(d):
+    """Flatten CS instance: [throughputs, gpu_counts, num_gpus]."""
+    throughputs, gpu_counts, num_gpus = d["instance"]
+    d["instance_throughputs"] = throughputs
+    d["instance_gpus"] = gpu_counts
+    d["instance_num_gpus"] = num_gpus
+    del d["instance"]
+    return d
+
+
 def load_single_dict_dataset(json_path, problem, num_samples=None):
     """
     Load and transform dataset from JSON file.
@@ -874,6 +924,8 @@ def load_single_dict_dataset(json_path, problem, num_samples=None):
         transformed_data = [transform_data_op(d) for d in data]
     elif problem == 'cvrp':
         transformed_data = [transform_data_cvrp(d) for d in data]
+    elif problem == 'cs':
+        transformed_data = [transform_data_cs(d) for d in data]
     else:
         # For other problems, no transformation needed yet
         transformed_data = data
@@ -904,6 +956,8 @@ def load_train_dict_dataset(json_path, problem):
             pass
         elif problem == 'cvrp':
             data = [transform_data_cvrp(data)]
+        elif problem == 'cs':
+            data = [transform_data_cs(data)]
     elif isinstance(data, list):
         # Flatten each dict in the list
         if problem == 'op':
@@ -912,6 +966,8 @@ def load_train_dict_dataset(json_path, problem):
             pass
         elif problem == 'cvrp':
             data = [transform_data_cvrp(d) for d in data]
+        elif problem == 'cs':
+            data = [transform_data_cs(d) for d in data]
     else:
         raise ValueError("JSON must be either a dict or a list of dicts.")
     return Dataset.from_list(data)

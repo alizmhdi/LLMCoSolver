@@ -115,7 +115,7 @@ def tag_prompt_and_transform_to_json_orienteering(
     p_size = instance.shape[0]
 
     instruction = (
-        f"Solve the Orienteering Problem with {p_size} nodes. "
+        f"Solve the  Orienteering Problemwith {p_size} nodes. "
         "Each node has (x, y) coordinates and a prize for visiting it. "
         f"You must plan a route that starts at depot {start_node}, "
         f"collecting the maximum total prize possible, subject to a maximum route length T = {max_route_length:.1f}. "
@@ -226,7 +226,7 @@ class OrienteeringEnv:
     def generate_clustered_nodes(self, n_nodes: int, mixed: bool = False, max_xy: float = 1.0) -> np.ndarray:
         """
         Generate node coordinates using clustered or mixed distribution.
-        
+
         Parameters
         ----------
         n_nodes : int
@@ -235,7 +235,7 @@ class OrienteeringEnv:
             If True, use mixed distribution (uniform + clustered). If False, use pure clustered.
         max_xy : float
             Maximum coordinate value for the space.
-            
+
         Returns
         -------
         np.ndarray
@@ -244,14 +244,14 @@ class OrienteeringEnv:
         uniform_frac = 0.5 if mixed else 0.0
         n_uniform = int(n_nodes * uniform_frac)
         n_clustered = n_nodes - n_uniform
-        
+
         # Generate uniform nodes for mixed distribution
         uniform_locs = np.random.uniform(0, max_xy, size=(n_uniform, 2)) if n_uniform > 0 else np.empty((0, 2))
-        
+
         # Generate cluster centers
         assert self.n_c < n_nodes, f"Number of clusters ({self.n_c}) must be less than number of nodes ({n_nodes})"
         centers = np.random.uniform(0.2, max_xy - 0.2, size=(self.n_c, 2))
-        
+
         # Generate clustered nodes around centers
         n_clustered_samples = 0
         all_clustered_locs = []
@@ -264,10 +264,10 @@ class OrienteeringEnv:
             cluster_locs = cluster_locs[(cluster_locs >= 0).all(axis=1) & (cluster_locs < max_xy).all(axis=1)]
             all_clustered_locs.append(cluster_locs)
             n_clustered_samples += len(cluster_locs)
-        
+
         # Combine all clustered locations and trim to exact number needed
         cluster_locs = np.concatenate(all_clustered_locs)[:n_clustered] if all_clustered_locs else np.empty((0, 2))
-        
+
         # Combine uniform and clustered locations
         if n_uniform > 0 and n_clustered > 0:
             xys = np.vstack((uniform_locs, cluster_locs))
@@ -275,7 +275,7 @@ class OrienteeringEnv:
             xys = uniform_locs
         else:
             xys = cluster_locs
-            
+
         return xys
 
     def generate_gaussian_mixture_points(
@@ -358,7 +358,7 @@ class OrienteeringEnv:
             size_i = self.uniform_random_choice(self.n_node_range[0], self.n_node_range[1])
             # 2) Randomly choose distribution
             distribution_i = random.choice(self.distributions)
-            
+
             # 3) Generate coords based on distribution type
             if distribution_i == 'clustered':
                 coords = self.generate_clustered_nodes(size_i, mixed=False, max_xy=1.0)
@@ -373,11 +373,11 @@ class OrienteeringEnv:
             # Scale by 1000 and convert to tensor
             coords = coords * 1000
             coords_tensor = torch.tensor(coords).int()
-            
+
             # 4) Generate prizes
             prizes = generate_random_prizes(size_i, low=low_prize, high=high_prize)
             prizes[0] = 0  # Depot prize is 0
-            
+
             # 5) Generate random T based on approximate TSP distance
             distance_matrix = util.build_distance_matrix(coords)
             parameters = {

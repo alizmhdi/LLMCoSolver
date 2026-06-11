@@ -171,6 +171,8 @@ def train_model(args):
         reward_funcs = [optimality_reward_func_jssp, feasibility_reward_func_jssp]
     elif args.problem == 'te':
         reward_funcs = [optimality_reward_func_te, feasibility_reward_func_te]
+    elif args.problem == 'cs':
+        reward_funcs = [optimality_reward_func_cs, feasibility_reward_func_cs]
     else:
         raise ValueError("Problem not supported for reward functions.")
 

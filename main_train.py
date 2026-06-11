@@ -489,6 +489,44 @@ def compute_metric_cop(predictions, labels, instances, problem):
             gap = (optimal_indset_size - pred_indset_size) / (optimal_indset_size if optimal_indset_size != 0 else 1e-9)
             gaps.append(gap)
 
+        elif problem == "cs":
+            pred_match = re.search(r"Schedule:\s*\[([^\]]+)\]", prediction_solution)
+            if not pred_match:
+                infeasibility += 1
+                continue
+
+            schedule_str = pred_match.group(1).strip()
+            try:
+                schedule = [int(x.strip()) for x in schedule_str.split(",") if x.strip() != ""]
+            except ValueError:
+                infeasibility += 1
+                continue
+
+            throughputs, gpu_counts, num_gpus = instances[i][0], instances[i][1], float(instances[i][2])
+            num_jobs = len(throughputs)
+
+            if not all(0 <= j < num_jobs for j in schedule):
+                infeasibility += 1
+                continue
+            if len(schedule) != len(set(schedule)):
+                infeasibility += 1
+                continue
+
+            total_gpus = sum(float(gpu_counts[j]) for j in schedule)
+            if total_gpus > num_gpus + 1e-9:
+                infeasibility += 1
+                continue
+
+            label_obj_match = re.search(r"Objective:\s*([\d.]+)", label_solution)
+            if not label_obj_match:
+                infeasibility += 1
+                continue
+
+            opt_throughput = float(label_obj_match.group(1))
+            pred_throughput = sum(float(throughputs[j]) for j in schedule)
+            gap = (opt_throughput - pred_throughput) / (opt_throughput if opt_throughput != 0 else 1e-9)
+            gaps.append(max(0.0, gap))
+
         elif problem == "pfsp":
             # Parse the predicted job order
             pred_match = re.search(r"Order:\s*\[([^\]]+)\]", prediction_solution)

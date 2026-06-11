@@ -25,10 +25,32 @@ It now supports training and evaluation on multiple combinatorial optimization p
 - **TSP** (Traveling Salesman Problem)
 - **CVRP** (Capacitated Vehicle Routing Problem) 
 - **OP** (Orienteering Problem)
+- **CS** (GPU Cluster Scheduling)
 - **MVC** (Minimum Vertex Cover)
 - **MIS** (Maximum Independent Set)
 - **PFSP** (Permutation Flow Shop Problem)
 - **JSSP** (Job Shop Scheduling Problem)
+
+## Environment setup
+
+LLMCO pins `unsloth==2025.3.19`, which requires **Python 3.9–3.12** (`>=3.9,<3.13`). Python 3.13+ will fail with:
+
+```
+ERROR: No matching distribution found for unsloth==2025.3.19
+```
+
+Create the virtualenv with Python 3.12:
+
+```bash
+cd src/problems/cluster_scheduling/solvers/LLMCO
+rm -rf .venv
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+If `python3.12` is not on your PATH, use the full path (e.g. `/home/linuxbrew/.linuxbrew/bin/python3.12`).
 
 ## 🔔 Data Format
 
@@ -41,10 +63,65 @@ Place your training and evaluation data in the following structure:
 ```
 data/
 ├── <problem_name>/
-│   ├── train/           # Training data
+│   ├── train/           # Training data (HF Dataset on disk)
 │   ├── eval/            # Evaluation data  
-│   └── instances.pkl    # Problem instances
+│   └── instances.pkl    # Problem instances (optional, for vanilla eval)
+data_rl/
+├── <problem_name>/
+│   ├── train/train_rl.json
+│   └── eval/test.json
 ```
+
+### Cluster Scheduling (CS) data generation
+
+CS is a 0/1 knapsack-style problem: maximize total job throughput subject to a GPU capacity constraint. Gurobi is required to generate optimal labels.
+
+```bash
+cd src/problems/cluster_scheduling/solvers/LLMCO
+
+# RL training data (includes instance field for reward computation)
+python Envs/CSEnv/CSEnv.py \
+  --n_instance 10000 \
+  --output data_rl/cs/train/train_rl.json \
+  --rl_data --save_pkl \
+  --n_job_range 10 20 \
+  --num_gpus 50 \
+  --throughput_range 0 50 \
+  --gpu_range 1 20
+
+python Envs/CSEnv/CSEnv.py \
+  --n_instance 1000 \
+  --output data_rl/cs/eval/test.json \
+  --rl_data \
+  --n_job_range 10 20 \
+  --num_gpus 50
+
+# SFT data (no instance field)
+python Envs/CSEnv/CSEnv.py \
+  --n_instance 10000 \
+  --output data/cs/raw/train.json \
+  --n_job_range 10 20
+
+python Envs/CSEnv/CSEnv.py \
+  --n_instance 1000 \
+  --output data/cs/raw/eval.json \
+  --n_job_range 10 20
+
+# Convert JSON to HuggingFace datasets for SFT
+python scripts/export_sft_dataset.py --input data/cs/raw/train.json --output data/cs/train
+python scripts/export_sft_dataset.py --input data/cs/raw/eval.json --output data/cs/eval
+```
+
+Generation parameters:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--n_job_range` | 20 20 | Min/max jobs per instance |
+| `--num_gpus` | 50 | Cluster GPU capacity N |
+| `--throughput_range` | 0 50 | Min/max **integer** throughput per job (inclusive) |
+| `--gpu_range` | 1 20 | Min/max GPUs per job |
+
+Use `--num_nodes` when training/filtering to match job count (CS sets `num_nodes` = number of jobs).
 
 
 ## 💻 Training Pipeline
@@ -60,7 +137,7 @@ python main_train.py --problem <problem_name> [options]
 ```
 
 **Key parameters:**
-- `--problem`: Problem type (tsp, cvrp, op, mvc, mis, pfsp, jssp)
+- `--problem`: Problem type (tsp, cvrp, op, cs, mvc, mis, pfsp, jssp)
 - `--model_name`: Base model to fine-tune (default: unsloth/Qwen2.5-7B)
 - `--max_seq_length`: Maximum sequence length (default: 20000)
 - `--per_device_train_batch_size`: Batch size per device (default: 4)
@@ -154,7 +231,25 @@ python rl_train.py --problem cvrp --model_name output_alpha64_r64_cvrp_gamma_tra
 bash cmd.sh
 
 # 4. Evaluate
-python eval.py --model_id saved_models --problem cvrp --eval_method vanilla --num_samples 100
+python eval.py --model_id saved_models --problem cs --eval_method best_of_n \
+  --dataset_method get_dataset --num_samples 100 --best_of_n 8
+```
+
+### CS quick start
+
+```bash
+# 1. Generate data (see CS data generation above)
+
+# 2. SFT
+python main_train.py --problem cs --num_nodes 20 --num_train_epochs 1
+
+# 3. RL
+python rl_train.py --problem cs --model_name <sft_checkpoint> --num_nodes 20
+
+# 4. Merge + eval
+bash cmd.sh
+python eval.py --model_id saved_models --problem cs --eval_method best_of_n \
+  --dataset_method get_dataset --num_samples 100
 ```
 
 

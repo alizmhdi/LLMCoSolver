@@ -22,6 +22,7 @@ from Envs.eval_utils import (
     optimality_reward_func_pfsp,
     optimality_reward_func_jssp
 )
+from rewards import optimality_reward_func_cs
 from datasets import load_dataset
 
 
@@ -313,6 +314,16 @@ def select_best_solution(completions, ground_truth, idx, n, problem, eval_datase
             repeated_ground_truth,
             repeated_instance
         )
+    elif problem == 'cs':
+        rewards = optimality_reward_func_cs(
+            completions,
+            repeated_ground_truth,
+            [eval_dataset["instance_throughputs"][idx]] * n,
+            [eval_dataset["instance_gpus"][idx]] * n,
+            [eval_dataset["instance_num_gpus"][idx]] * n,
+        )
+    else:
+        raise ValueError(f"Problem {problem!r} not supported in select_best_solution.")
     
     # Select the candidate with the highest reward
     best_idx = int(np.argmax(rewards))

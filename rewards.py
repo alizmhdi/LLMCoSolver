@@ -52,6 +52,107 @@ def parse_solution_op(response):
         return None
 
 
+def parse_solution_cs(response):
+    """Parse the cluster scheduling solution from the response."""
+    pred_match = re.search(r"Schedule:\s*\[([^\]]+)\]", response)
+    if not pred_match:
+        return None
+
+    schedule_str = pred_match.group(1)
+    try:
+        schedule = [int(x.strip()) for x in schedule_str.split(",") if x.strip() != ""]
+        return schedule
+    except ValueError:
+        return None
+
+
+def feasibility_reward_func_cs(
+    completions, instance_throughputs, instance_gpus, instance_num_gpus, **kwargs
+):
+    """Feasibility reward for cluster scheduling (parse, unique jobs, GPU capacity)."""
+    scores = []
+    weights = {
+        "parse": 0.2,
+        "unique_jobs": 0.3,
+        "capacity": 0.5,
+    }
+
+    for i, response in enumerate(completions):
+        score = 0.0
+        schedule = parse_solution_cs(response)
+        if schedule is None:
+            scores.append(0.0)
+            continue
+
+        score += weights["parse"]
+
+        if len(schedule) == len(set(schedule)):
+            score += weights["unique_jobs"]
+
+        try:
+            throughputs = instance_throughputs[i]
+            gpu_counts = instance_gpus[i]
+            num_gpus = float(instance_num_gpus[i])
+            num_jobs = len(throughputs)
+
+            valid_indices = all(0 <= j < num_jobs for j in schedule)
+            if not valid_indices:
+                scores.append(score)
+                continue
+
+            total_gpus = sum(float(gpu_counts[j]) for j in schedule)
+            if total_gpus <= num_gpus + 1e-9:
+                score += weights["capacity"]
+        except Exception:
+            pass
+
+        scores.append(score)
+
+    return scores
+
+
+def optimality_reward_func_cs(
+    completions,
+    ground_truth,
+    instance_throughputs,
+    instance_gpus,
+    instance_num_gpus,
+    **kwargs,
+):
+    """Optimality reward: predicted throughput vs optimal throughput."""
+    scores = []
+    feasible_scores = feasibility_reward_func_cs(
+        completions, instance_throughputs, instance_gpus, instance_num_gpus
+    )
+
+    for i, (response, feasibility_score) in enumerate(zip(completions, feasible_scores)):
+        if feasibility_score < 1.0:
+            scores.append(0.0)
+            continue
+
+        schedule = parse_solution_cs(response)
+        if schedule is None:
+            scores.append(0.0)
+            continue
+
+        try:
+            throughputs = instance_throughputs[i]
+            llm_throughput = sum(float(throughputs[j]) for j in schedule)
+
+            label_obj_match = re.search(r"Objective:\s*([\d.]+)", ground_truth[i])
+            if not label_obj_match:
+                scores.append(0.0)
+                continue
+
+            opt_throughput = float(label_obj_match.group(1))
+            ratio = 2 * llm_throughput / max(0.1, opt_throughput)
+            scores.append(ratio)
+        except Exception:
+            scores.append(0.0)
+
+    return scores
+
+
 def feasibility_reward_func_op(completions, instance_coords, instance_max_dist, **kwargs):
     """
     Calculate the feasibility reward for the Orienteering Problem with more granular feedback.
