@@ -134,14 +134,29 @@ def load_datasets(
                 if node_filter_active(num_nodes, min_nodes, max_nodes) else ""
             )
         )
-    
-    # Use per-row instances when filtering so metrics align with eval indices
-    if node_filter_active(num_nodes, min_nodes, max_nodes) and "instance" in eval_dataset.column_names:
-        number_dataset = list(eval_dataset["instance"])
-    else:
-        number_dataset = load_pkl_dataset(f'./data/{problem}/instances.pkl')
-    
+
+    number_dataset = _build_number_dataset(eval_dataset, problem)
+
     return eval_dataset, number_dataset
+
+
+def _build_number_dataset(eval_dataset, problem):
+    """Resolve raw instance data aligned with eval_dataset rows."""
+    if "instance" in eval_dataset.column_names:
+        return list(eval_dataset["instance"])
+
+    cs_cols = ("instance_throughputs", "instance_gpus", "instance_num_gpus")
+    if problem == "cs" and all(col in eval_dataset.column_names for col in cs_cols):
+        return [
+            [throughputs, gpu_counts, num_gpus]
+            for throughputs, gpu_counts, num_gpus in zip(
+                eval_dataset["instance_throughputs"],
+                eval_dataset["instance_gpus"],
+                eval_dataset["instance_num_gpus"],
+            )
+        ]
+
+    return load_pkl_dataset(f'./data/{problem}/instances.pkl')
 
 
 def get_generation_kwargs(tokenizer, eval_method, n=8, temperature=0.7, top_p=0.9):

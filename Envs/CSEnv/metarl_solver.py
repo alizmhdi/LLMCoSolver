@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -13,9 +14,8 @@ if _LLMCO_ROOT not in sys.path:
     sys.path.insert(0, _LLMCO_ROOT)
 
 from Envs.CSEnv.CSEnv import _format_job_descriptions  # noqa: E402
-from rewards import parse_solution_cs  # noqa: E402
 
-ALPACA_PROMPT = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance.
+ALPACA_PROMPT = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance. 
     Your task is to produce a feasible solution that optimizes (minimizes or maximizes) the given objective.
 
     ### Instruction:{instruction}
@@ -23,6 +23,19 @@ ALPACA_PROMPT = """Below is an instruction describing a combinatorial optimizati
     ### Input:{input}
 
     ### Response:"""
+
+
+def parse_solution_cs(response: str) -> list[int] | None:
+    """Parse scheduled job indices from an LLM completion."""
+    pred_match = re.search(r"Schedule:\s*\[([^\]]+)\]", response)
+    if not pred_match:
+        return None
+
+    schedule_str = pred_match.group(1)
+    try:
+        return [int(x.strip()) for x in schedule_str.split(",") if x.strip() != ""]
+    except ValueError:
+        return None
 
 
 def build_cs_prompt_fields(jobs, num_gpus, top_k_density: int = 3) -> dict[str, str]:
@@ -138,6 +151,8 @@ def run_llmco_cs(
     for response in responses:
         throughput, schedule = evaluate_completion(response, jobs, num_gpus)
         if schedule is None:
+            if verbose and best_schedule is None and n_valid == 0:
+                print(f"[LLMCO-CS] sample invalid completion: {response[:200]!r}")
             continue
         n_valid += 1
         if best_throughput is None or throughput > best_throughput:

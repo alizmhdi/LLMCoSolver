@@ -56,6 +56,7 @@ def solve_cs_gurobi(throughputs, gpu_counts, num_gpus):
 		selected = [j for j in range(n) if x[j].X > 0.5]
 		return float(model.ObjVal), selected
 	except gp.GurobiError:
+		print("Gurobi error in solve_cs_gurobi")
 		return None, None
 
 
@@ -231,13 +232,13 @@ def parse_args():
 		help='Also save raw instances as pickle')
 	parser.add_argument('--pkl_path', type=str, default='./instances.pkl',
 		help='Pickle output path when --save_pkl is set')
-	parser.add_argument('--n_job_range', type=int, nargs=2, default=[15, 20],
+	parser.add_argument('--n_job_range', type=int, nargs=2, default=[20, 20],
 		help='Min and max number of jobs per instance')
 	parser.add_argument('--num_gpus', type=int, default=100,
 		help='Cluster GPU capacity N')
 	parser.add_argument('--throughput_range', type=int, nargs=2, default=[0, 10],
 		help='Min and max integer throughput per job (inclusive)')
-	parser.add_argument('--gpu_range', type=int, nargs=2, default=[1, 50],
+	parser.add_argument('--gpu_range', type=int, nargs=2, default=[1, 20],
 		help='Min and max GPUs requested per job')
 	parser.add_argument('--seed', type=int, default=42,
 		help='Random seed')

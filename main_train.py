@@ -132,6 +132,10 @@ def parse_args() -> argparse.Namespace:
                         help='Cap the number of training examples after filtering')
     parser.add_argument('--max_eval_samples', type=int, default=None,
                         help='Cap the number of eval examples after filtering')
+    parser.add_argument('--target_eval_loss', type=float, default=None,
+                        help='Stop SFT when eval/test loss drops below this value')
+    parser.add_argument('--max_train_epochs', type=int, default=100,
+                        help='Max epochs when training until --target_eval_loss is reached')
 
     args = parser.parse_args()
 
@@ -641,6 +645,22 @@ def generate_and_compute_metrics(model, tokenizer, eval_dataset, instances, prob
     }
 
 
+class EvalLossThresholdCallback(TrainerCallback):
+    """Stop training once eval_loss on the test set drops below a target."""
+
+    def __init__(self, target_eval_loss: float):
+        self.target_eval_loss = target_eval_loss
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        eval_loss = metrics.get("eval_loss") if metrics else None
+        if eval_loss is not None and eval_loss < self.target_eval_loss:
+            print(
+                f"Target eval loss reached: {eval_loss:.6f} < {self.target_eval_loss}. "
+                "Stopping training."
+            )
+            control.should_training_stop = True
+
+
 class WandbEvalCallback(TrainerCallback):
     """
     A custom callback to run evaluation via model.generate
@@ -743,11 +763,30 @@ def train_model(args):
     )
     # print(train_dataset[0:8])
 
+    train_until_target_loss = (
+        args.target_eval_loss is not None and eval_dataset is not None
+    )
+    if args.target_eval_loss is not None and eval_dataset is None:
+        print(
+            "Warning: --target_eval_loss set but eval/test dataset is empty; "
+            "falling back to fixed-epoch training."
+        )
+
+    num_train_epochs = (
+        args.max_train_epochs if train_until_target_loss else args.num_train_epochs
+    )
+    evaluation_strategy = "steps" if train_until_target_loss else "no"
+    callbacks = []
+    if train_until_target_loss:
+        print(
+            f"Training until eval/test loss < {args.target_eval_loss} "
+            f"(max {num_train_epochs} epochs, eval every {args.eval_steps} steps)."
+        )
+        callbacks.append(EvalLossThresholdCallback(args.target_eval_loss))
+
     # =========================
     # Create the Trainer
     # =========================
-    # - We do NOT set eval_dataset, eval_strategy, or compute_metrics.
-    # - We'll rely on our custom callback to do the evaluation steps.
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -758,11 +797,13 @@ def train_model(args):
         dataset_num_proc=16,
         packing=False,
         data_collator=collator,
+        callbacks=callbacks,
         args=TrainingArguments(
             per_device_train_batch_size=args.per_device_train_batch_size,
+            per_device_eval_batch_size=args.per_device_eval_batch_size,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             warmup_steps=args.warmup_steps,
-            num_train_epochs=args.num_train_epochs,
+            num_train_epochs=num_train_epochs,
             learning_rate=args.learning_rate,
             bf16=is_bfloat16_supported(),
             logging_steps=args.logging_steps,
@@ -772,10 +813,9 @@ def train_model(args):
             seed=args.seed,
             output_dir=dir_out,
             report_to="wandb",
-            evaluation_strategy="no",
+            evaluation_strategy=evaluation_strategy,
+            eval_steps=args.eval_steps if train_until_target_loss else None,
             metric_for_best_model="eval_loss",
-            # eval_steps=args.eval_steps,
-            # load_best_model_at_end=True,
             save_total_limit=args.save_total_limit,
             save_steps=args.save_step,
         ),
