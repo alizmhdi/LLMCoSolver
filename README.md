@@ -52,6 +52,26 @@ pip install -r requirements.txt
 
 If `python3.12` is not on your PATH, use the full path (e.g. `/home/linuxbrew/.linuxbrew/bin/python3.12`).
 
+### Gurobi (required for CS data generation)
+
+CS label generation calls Gurobi from `Envs/CSEnv/CSEnv.py`. On Anvil, use the **site license** (no personal `grbgetkey`):
+
+```bash
+module load gurobi/9.5.1
+export GRB_LICENSE_FILE="$GUROBI_HOME/license/gurobi.lic"
+```
+
+The license file points at RCAC's token server (`license.rcac.purdue.edu`). **Do not run on login nodes** — submit a batch job or use `sinteractive` on a compute node.
+
+Example batch job (uses Anvil site license):
+
+```bash
+cd src/problems/cluster_scheduling/solvers/LLMCO
+sbatch scripts/anvil/cs_generate.slurm
+```
+
+If your allocation is AI-only (`cis260760-ai`), Slurm requires `-p ai` and at least one GPU even for this CPU-only generator.
+
 ## 🔔 Data Format
 
 You can generate your own data through the problem-specific environments under /Envs/, or use the data generated in the original paper: 
@@ -151,6 +171,14 @@ python main_train.py --problem <problem_name> [options]
 python main_train.py --problem cvrp --num_train_epochs 1 --per_device_train_batch_size 4
 ```
 
+**Anvil (CS, from scratch, 3 epochs):**
+```bash
+cd src/problems/cluster_scheduling/solvers/LLMCO
+sbatch scripts/anvil/cs_sft.slurm
+```
+
+Requires `data/cs/train/train_cs.json` and `data/cs/eval/test.json`. Checkpoints go to `$SCRATCH/MetaRL/runs/sft/`.
+
 ### 2. Reinforcement Learning (RL)
 
 After SFT, improve the model using reinforcement learning (GRPO):
@@ -171,6 +199,14 @@ python rl_train.py --problem <problem_name> --model_name <sft_checkpoint_path> [
 ```bash
 python rl_train.py --problem cvrp --model_name output_alpha64_r64_cvrp_gamma_train_embed_tok_False_seq20000_b4_ep1/checkpoint-31250
 ```
+
+**Anvil (CS, feasibility-only RL, 1 epoch):**
+```bash
+cd src/problems/cluster_scheduling/solvers/LLMCO
+sbatch scripts/anvil/cs_rl.slurm
+```
+
+Uses `data_rl/cs/` and starts from your SFT checkpoint. Pass `--feasibility_only` to train on feasibility reward only.
 
 ### 3. Model Merging
 
