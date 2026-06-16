@@ -102,7 +102,7 @@ def evaluate_completion(response: str, jobs, num_gpus) -> tuple[float | None, np
     """Parse an LLM completion and return (total_throughput, schedule)."""
     jobs = np.asarray(jobs, dtype=np.float64)
     throughputs = jobs[:, 0]
-    gpu_counts = jobs[:, 1]
+    gpu_counts = np.round(jobs[:, 1]).astype(np.int64)
 
     schedule = _validate_cs_schedule(
         parse_solution_cs(response),
