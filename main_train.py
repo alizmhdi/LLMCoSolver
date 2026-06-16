@@ -1,4 +1,5 @@
 import argparse
+import json
 import torch
 import wandb
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -136,10 +137,61 @@ def parse_args() -> argparse.Namespace:
                         help='Stop SFT when eval/test loss drops below this value')
     parser.add_argument('--max_train_epochs', type=int, default=100,
                         help='Max epochs when training until --target_eval_loss is reached')
+    parser.add_argument('--report_to', type=str, default='none',
+                        help='Logging integrations for TrainingArguments (e.g. none, wandb, tensorboard)')
 
     args = parser.parse_args()
 
     return args
+
+
+_SFT_JSON_COLUMNS = (
+    "num_jobs", "num_nodes", "num_gpus", "instruction", "input", "output",
+)
+
+
+def _load_json_split(json_path: str):
+    """Load SFT JSON without nested columns that break Arrow conversion."""
+    from datasets import Dataset
+
+    with open(json_path, encoding="utf-8") as f:
+        rows = json.load(f)
+    if isinstance(rows, dict):
+        rows = [rows]
+
+    sft_rows = []
+    for row in rows:
+        sft_rows.append({col: row[col] for col in _SFT_JSON_COLUMNS if col in row})
+    return Dataset.from_list(sft_rows)
+
+
+def _load_local_split(problem: str, split: str, role: str):
+    """Load a train/test split from HF-on-disk data or a JSON file in data/<problem>/<role>/."""
+    data_dir = f'./data/{problem}/{role}'
+    if not os.path.isdir(data_dir):
+        raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
+
+    dict_marker = os.path.join(data_dir, 'dataset_dict.json')
+    if os.path.isfile(dict_marker):
+        from datasets import load_from_disk
+        return load_from_disk(data_dir)[split]
+
+    # Prefer *.raw.json (plain SFT export) over test.json enriched with nested instance fields.
+    raw_files = sorted(
+        os.path.join(data_dir, name)
+        for name in os.listdir(data_dir)
+        if name.endswith('.raw.json')
+    )
+    json_files = sorted(
+        os.path.join(data_dir, name)
+        for name in os.listdir(data_dir)
+        if name.endswith('.json') and not name.endswith('.raw.json')
+    )
+    json_path = raw_files[0] if raw_files else (json_files[0] if json_files else None)
+    if json_path:
+        return _load_json_split(json_path)
+
+    return load_dataset(data_dir, split=split, cache_dir="../datasets")
 
 
 def get_dataset(
@@ -177,9 +229,9 @@ def get_dataset(
     # =========================
 
     # put the data in the data folder
-    # Load training dataset from its own directory
-    train_dataset = load_dataset('./data/' + problem + '/train', split="train", cache_dir="../datasets").shuffle(seed=42)
-    eval_dataset = load_dataset('./data/' + problem + '/eval', split="test", cache_dir="../datasets")
+    train_dataset = _load_local_split(problem, split="train", role="train")
+    eval_dataset = _load_local_split(problem, split="test", role="eval")
+    train_dataset = train_dataset.shuffle(seed=42)
 
     if node_filter_active(num_nodes, min_nodes, max_nodes):
         train_dataset = filter_dataset_by_nodes(
@@ -705,12 +757,14 @@ def train_model(args):
         dir_out = args.output_dir
 
     # =========================
-    # Initialize WandB
+    # Optional WandB
     # =========================
-    wandb.init(
-        project=args.model_name.split('/')[1] + "_" + args.problem + "_cop_solver",
-        name=dir_out,
-    )
+    use_wandb = args.report_to not in (None, "", "none", "[]")
+    if use_wandb:
+        wandb.init(
+            project=args.model_name.split('/')[1] + "_" + args.problem + "_cop_solver",
+            name=dir_out,
+        )
 
     dtype = torch.bfloat16 if args.dtype == 'bfloat16' else torch.float16
     problem = args.problem
@@ -812,7 +866,7 @@ def train_model(args):
             lr_scheduler_type=args.lr_scheduler_type,
             seed=args.seed,
             output_dir=dir_out,
-            report_to="wandb",
+            report_to=args.report_to,
             evaluation_strategy=evaluation_strategy,
             eval_steps=args.eval_steps if train_until_target_loss else None,
             metric_for_best_model="eval_loss",

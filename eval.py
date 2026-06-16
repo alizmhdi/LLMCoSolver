@@ -1,5 +1,6 @@
 import unsloth
 import argparse
+import os
 import torch
 import numpy as np
 from transformers import AutoTokenizer, pipeline, AutoModelForCausalLM
@@ -68,11 +69,22 @@ def load_model_and_tokenizer(model_id):
     Returns:
         tuple: (model, tokenizer, pipeline)
     """
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        device_map="auto",
-        torch_dtype=torch.float16
-    )
+    import os
+
+    if os.path.isfile(os.path.join(model_id, "adapter_config.json")):
+        from peft import AutoPeftModelForCausalLM
+
+        model = AutoPeftModelForCausalLM.from_pretrained(
+            model_id,
+            device_map="auto",
+            torch_dtype=torch.float16,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            device_map="auto",
+            torch_dtype=torch.float16,
+        )
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
     
@@ -109,8 +121,12 @@ def load_datasets(
         dataset_method = 'load_dataset' if eval_method == 'vanilla' else 'get_dataset'
     
     if dataset_method == 'load_dataset':
-        # Method used in main_eval.py
-        eval_dataset = load_dataset(f'./data/{problem}/eval', split="test")
+        eval_json = f'./data/{problem}/eval/test.json'
+        if os.path.isfile(eval_json):
+            from utils import load_train_dict_dataset
+            eval_dataset = load_train_dict_dataset(eval_json, problem)
+        else:
+            eval_dataset = load_dataset(f'./data/{problem}/eval', split="test")
         eval_dataset = filter_dataset_by_nodes(
             eval_dataset, num_nodes=num_nodes, min_nodes=min_nodes, max_nodes=max_nodes
         )

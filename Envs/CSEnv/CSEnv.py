@@ -26,6 +26,23 @@ def save_dataset(dataset, filename, disable_print=False):
 		print(f">> Save dataset to {filename}")
 
 
+def check_gurobi_license():
+	"""Fail fast when Gurobi cannot acquire a license (e.g. on Anvil login nodes)."""
+	try:
+		model = gp.Model("cs_license_check")
+		model.setParam("OutputFlag", 0)
+		model.setParam("LogToConsole", 0)
+		model.dispose()
+	except gp.GurobiError as exc:
+		raise SystemExit(
+			f"Gurobi license check failed: {exc}\n"
+			"On Anvil: module load gurobi/9.5.1 && "
+			'export GRB_LICENSE_FILE="$GUROBI_HOME/license/gurobi.lic"\n'
+			"Then run this script on a compute node via sinteractive or sbatch, "
+			"not on a login node."
+		) from exc
+
+
 def solve_cs_gurobi(throughputs, gpu_counts, num_gpus):
 	"""Exact 0/1 cluster scheduling via one-shot Gurobi MIP."""
 	throughputs = np.asarray(throughputs, dtype=np.float64)
@@ -55,8 +72,8 @@ def solve_cs_gurobi(throughputs, gpu_counts, num_gpus):
 
 		selected = [j for j in range(n) if x[j].X > 0.5]
 		return float(model.ObjVal), selected
-	except gp.GurobiError:
-		print("Gurobi error in solve_cs_gurobi")
+	except gp.GurobiError as exc:
+		print(f"Gurobi error in solve_cs_gurobi: {exc}")
 		return None, None
 
 
@@ -247,6 +264,7 @@ def parse_args():
 
 if __name__ == "__main__":
 	args = parse_args()
+	check_gurobi_license()
 	env = ClusterSchedulingEnv(
 		n_job_range=args.n_job_range,
 		num_gpus=args.num_gpus,

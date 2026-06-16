@@ -79,6 +79,10 @@ def parse_args() -> argparse.Namespace:
                         help='Cap the number of training examples after filtering')
     parser.add_argument('--max_eval_samples', type=int, default=None,
                         help='Cap the number of eval examples after filtering')
+    parser.add_argument('--feasibility_only', action='store_true', default=False,
+                        help='Use only the feasibility reward (no optimality reward)')
+    parser.add_argument('--report_to', type=str, default='none',
+                        help='Logging integrations for GRPOConfig (e.g. none, wandb)')
 
     args = parser.parse_args()
 
@@ -97,12 +101,14 @@ def train_model(args):
         dir_out = args.output_dir
 
     # =========================
-    # Initialize WandB
+    # Optional WandB
     # =========================
-    wandb.init(
-        project=args.model_name.split('/')[1] + "_gemma_cop_solver",
-        name=dir_out,
-    )
+    use_wandb = args.report_to not in (None, "", "none", "[]")
+    if use_wandb:
+        wandb.init(
+            project=args.model_name.split('/')[1] + "_gemma_cop_solver",
+            name=dir_out,
+        )
 
     dtype = torch.bfloat16 if args.dtype == 'bfloat16' else torch.float16
     problem = args.problem
@@ -172,7 +178,10 @@ def train_model(args):
     elif args.problem == 'te':
         reward_funcs = [optimality_reward_func_te, feasibility_reward_func_te]
     elif args.problem == 'cs':
-        reward_funcs = [optimality_reward_func_cs, feasibility_reward_func_cs]
+        if args.feasibility_only:
+            reward_funcs = [feasibility_reward_func_cs]
+        else:
+            reward_funcs = [optimality_reward_func_cs, feasibility_reward_func_cs]
     else:
         raise ValueError("Problem not supported for reward functions.")
 
@@ -205,7 +214,7 @@ def train_model(args):
             max_prompt_length = args.max_prompt_length,
             max_completion_length = args.max_completion_length,
             output_dir=dir_out,
-            report_to="wandb",
+            report_to=args.report_to,
             evaluation_strategy="no",
             # eval_steps=args.eval_steps,
             # load_best_model_at_end=True,
