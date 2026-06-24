@@ -15,7 +15,7 @@ if _LLMCO_ROOT not in sys.path:
 
 from Envs.CSEnv.CSEnv import _format_job_descriptions  # noqa: E402
 
-ALPACA_PROMPT = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance. 
+ALPACA_PROMPT = """Below is an instruction describing a combinatorial optimization problem. It is paired with an input that provides the data of the instance.
     Your task is to produce a feasible solution that optimizes (minimizes or maximizes) the given objective.
 
     ### Instruction:{instruction}
@@ -117,6 +117,24 @@ def evaluate_completion(response: str, jobs, num_gpus) -> tuple[float | None, np
     return total_throughput, np.array(schedule, dtype=int)
 
 
+def evaluate_completion_parsed(response: str, jobs) -> tuple[float | None, list[int] | None]:
+    """Parse an LLM completion without feasibility checks."""
+    jobs = np.asarray(jobs, dtype=np.float64)
+    throughputs = jobs[:, 0]
+    schedule = parse_solution_cs(response)
+    if schedule is None:
+        return None, None
+
+    num_jobs = len(throughputs)
+    if not all(0 <= j < num_jobs for j in schedule):
+        return None, schedule
+    if len(schedule) != len(set(schedule)):
+        return None, schedule
+
+    total_throughput = float(sum(float(throughputs[j]) for j in schedule))
+    return total_throughput, schedule
+
+
 def run_llmco_cs(
     jobs,
     num_gpus,
@@ -146,18 +164,30 @@ def run_llmco_cs(
 
     best_throughput = None
     best_schedule = None
+    best_parsed_throughput = None
+    best_parsed_schedule = None
     n_valid = 0
 
     for response in responses:
         throughput, schedule = evaluate_completion(response, jobs, num_gpus)
-        if schedule is None:
-            if verbose and best_schedule is None and n_valid == 0:
-                print(f"[LLMCO-CS] sample invalid completion: {response[:200]!r}")
+        if schedule is not None:
+            n_valid += 1
+            if best_throughput is None or throughput > best_throughput:
+                best_throughput = throughput
+                best_schedule = schedule
+
+        parsed_throughput, parsed_schedule = evaluate_completion_parsed(response, jobs)
+        if parsed_schedule is None:
             continue
-        n_valid += 1
-        if best_throughput is None or throughput > best_throughput:
-            best_throughput = throughput
-            best_schedule = schedule
+        parsed_rank = parsed_throughput if parsed_throughput is not None else -float("inf")
+        best_rank = (
+            best_parsed_throughput
+            if best_parsed_throughput is not None
+            else -float("inf")
+        )
+        if best_parsed_schedule is None or parsed_rank > best_rank:
+            best_parsed_throughput = parsed_throughput
+            best_parsed_schedule = parsed_schedule
 
     if verbose:
         print(
@@ -165,6 +195,8 @@ def run_llmco_cs(
             f"best throughput={best_throughput}"
         )
 
-    if best_schedule is None:
-        return None, None
-    return best_throughput, best_schedule
+    if best_schedule is not None:
+        return best_throughput, best_schedule
+    if best_parsed_schedule is not None:
+        return best_parsed_throughput, np.array(best_parsed_schedule, dtype=int)
+    return None, None

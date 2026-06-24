@@ -6,11 +6,11 @@
 #   sbatch scripts/anvil/cs_sft.slurm
 #
 # Override hyperparameters:
-#   sbatch --export=ALL,NUM_EPOCHS=3,BATCH_SIZE=4,OUTPUT_DIR=$SCRATCH/MetaRL/runs/my_sft scripts/anvil/cs_sft.slurm
+#   sbatch --export=ALL,NUM_EPOCHS=1,BATCH_SIZE=4,OUTPUT_DIR=$SCRATCH/MetaRL/runs/my_sft scripts/anvil/cs_sft.slurm
 #
-# Expects:
-#   data/cs/train/train_cs.json   (100k SFT train)
-#   data/cs/eval/test.json        (10k SFT eval; test.raw.json also fine)
+# Expects (defaults from cs_generate_all.slurm):
+#   data/cs/train/train_cs.json   (200k SFT train)
+#   data/cs/eval/test.json        (10k SFT eval)
 
 #SBATCH -A cis260760-ai
 #SBATCH -p ai
@@ -42,14 +42,14 @@ mkdir -p "$HF_HOME" "$TMPDIR" /anvil/scratch/x-malizadeh/MetaRL/logs
 
 # --- training config (override via sbatch --export=ALL,VAR=value) ---
 BASE_MODEL="${BASE_MODEL:-unsloth/Qwen2.5-7B}"
-NUM_EPOCHS="${NUM_EPOCHS:-3}"
+NUM_EPOCHS="${NUM_EPOCHS:-1}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 LEARNING_RATE="${LEARNING_RATE:-2e-4}"
 LORA_R="${LORA_R:-64}"
 LORA_ALPHA="${LORA_ALPHA:-64}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-20000}"
-SAVE_STEPS="${SAVE_STEPS:-5000}"
+SAVE_STEPS="${SAVE_STEPS:-12500}"
 NUM_NODES="${NUM_NODES:-20}"
 SEED="${SEED:-42}"
 

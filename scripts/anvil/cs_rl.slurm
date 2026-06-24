@@ -1,12 +1,14 @@
 #!/bin/bash -l
-# GRPO RL training for CS — feasibility reward only, 1 epoch.
+# GRPO RL training for CS (optimality + feasibility rewards), 1 epoch.
 #
 # Submit:
 #   cd src/problems/cluster_scheduling/solvers/LLMCO
 #   sbatch scripts/anvil/cs_rl.slurm
 #
-# Override SFT checkpoint:
-#   sbatch --export=ALL,SFT_CHECKPOINT=/anvil/scratch/.../checkpoint-18750 scripts/anvil/cs_rl.slurm
+# Override SFT checkpoint, output dir, or disable num_nodes filter for j15-25 data:
+#   sbatch --export=ALL,SFT_OUTPUT_DIR=/anvil/scratch/.../cs_500k_j15-25 scripts/anvil/cs_rl.slurm
+#   sbatch --export=ALL,SFT_CHECKPOINT=/anvil/scratch/.../checkpoint-31250 scripts/anvil/cs_rl.slurm
+#   sbatch --export=ALL,NUM_NODES= scripts/anvil/cs_rl.slurm
 #
 # Expects:
 #   data_rl/cs/train/train_rl.json
@@ -40,22 +42,25 @@ export HF_HOME="${HF_HOME:-/anvil/scratch/x-malizadeh/MetaRL/cache/huggingface}"
 export TMPDIR="${TMPDIR:-/anvil/scratch/x-malizadeh/MetaRL/tmp}"
 mkdir -p "$HF_HOME" "$TMPDIR" /anvil/scratch/x-malizadeh/MetaRL/logs
 
-# --- defaults: last SFT checkpoint from your completed run ---
-SFT_CHECKPOINT="${SFT_CHECKPOINT:-/anvil/scratch/x-malizadeh/MetaRL/runs/sft/cs_ep3_n20_job18196582/checkpoint-18750}"
+# --- SFT checkpoint (defaults to latest under SFT_OUTPUT_DIR) ---
+SFT_OUTPUT_DIR="${SFT_OUTPUT_DIR:-/anvil/scratch/x-malizadeh/MetaRL/runs/sft/cs_500k_j15-25}"
+if [ -z "${SFT_CHECKPOINT:-}" ]; then
+  SFT_CHECKPOINT="$(ls -d "$SFT_OUTPUT_DIR"/checkpoint-* 2>/dev/null | sort -V | tail -1 || true)"
+fi
 NUM_EPOCHS="${NUM_EPOCHS:-1}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GRAD_ACCUM="${GRAD_ACCUM:-8}"
 LEARNING_RATE="${LEARNING_RATE:-1e-6}"
 NUM_GENERATIONS="${NUM_GENERATIONS:-8}"
 SAVE_STEPS="${SAVE_STEPS:-50}"
-NUM_NODES="${NUM_NODES:-20}"
+NUM_NODES="${NUM_NODES:-}"
 SEED="${SEED:-42}"
 
-OUTPUT_DIR="${OUTPUT_DIR:-/anvil/scratch/x-malizadeh/MetaRL/runs/rl/cs_feas_ep${NUM_EPOCHS}_job${SLURM_JOB_ID}}"
+OUTPUT_DIR="${OUTPUT_DIR:-/anvil/scratch/x-malizadeh/MetaRL/runs/rl/cs_rl_ep${NUM_EPOCHS}_job${SLURM_JOB_ID}}"
 
 echo "HOST=$(hostname) JOB_ID=$SLURM_JOB_ID START=$(date -Is)"
 echo "SFT_CHECKPOINT=$SFT_CHECKPOINT"
-echo "NUM_EPOCHS=$NUM_EPOCHS REWARD=feasibility_only OUTPUT_DIR=$OUTPUT_DIR"
+echo "NUM_EPOCHS=$NUM_EPOCHS REWARDS=optimality+feasibility OUTPUT_DIR=$OUTPUT_DIR"
 
 python - <<'PY'
 import json, sys
@@ -72,25 +77,30 @@ with eval_.open() as f:
 print(f"RL train: {n_train:,}  RL eval: {n_eval:,}")
 PY
 
-if [ ! -d "$SFT_CHECKPOINT" ]; then
-  echo "ERROR: SFT checkpoint not found: $SFT_CHECKPOINT" >&2
+if [ -z "${SFT_CHECKPOINT:-}" ] || [ ! -d "$SFT_CHECKPOINT" ]; then
+  echo "ERROR: SFT checkpoint not found under: $SFT_OUTPUT_DIR" >&2
+  echo "Set SFT_CHECKPOINT or SFT_OUTPUT_DIR explicitly." >&2
   exit 1
 fi
 
-python rl_train.py \
-  --problem cs \
-  --model_name "$SFT_CHECKPOINT" \
-  --feasibility_only \
-  --num_train_epochs "$NUM_EPOCHS" \
-  --per_device_train_batch_size "$BATCH_SIZE" \
-  --gradient_accumulation_steps "$GRAD_ACCUM" \
-  --learning_rate "$LEARNING_RATE" \
-  --num_generations "$NUM_GENERATIONS" \
-  --save_step "$SAVE_STEPS" \
-  --num_nodes "$NUM_NODES" \
-  --seed "$SEED" \
-  --report_to none \
+RL_ARGS=(
+  --problem cs
+  --model_name "$SFT_CHECKPOINT"
+  --num_train_epochs "$NUM_EPOCHS"
+  --per_device_train_batch_size "$BATCH_SIZE"
+  --gradient_accumulation_steps "$GRAD_ACCUM"
+  --learning_rate "$LEARNING_RATE"
+  --num_generations "$NUM_GENERATIONS"
+  --save_step "$SAVE_STEPS"
+  --seed "$SEED"
+  --report_to none
   --output_dir "$OUTPUT_DIR"
+)
+if [ -n "${NUM_NODES:-}" ]; then
+  RL_ARGS+=(--num_nodes "$NUM_NODES")
+fi
+
+python rl_train.py "${RL_ARGS[@]}"
 
 echo "RL complete $(date -Is)"
 echo "Checkpoints: $OUTPUT_DIR"

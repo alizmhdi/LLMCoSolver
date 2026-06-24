@@ -27,4 +27,4 @@ echo "Latest RL checkpoint: $MODEL_DIR"
 echo "Merged output:        $OUTPUT_DIR"
 
 export MODEL_DIR OUTPUT_DIR
-bash "$METARL_ROOT/repo/LLMCO_cmd.sh"
+python merge_model.py

@@ -124,7 +124,6 @@ def tag_prompt_and_transform_to_json_cs(jobs, num_gpus, selected, opt_throughput
 
 	return {
 		"num_jobs": str(num_jobs),
-		"num_nodes": str(num_jobs),
 		"num_gpus": str(int(num_gpus)),
 		"instruction": instruction,
 		"input": _format_job_descriptions(jobs),
